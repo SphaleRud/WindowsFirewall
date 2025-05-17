@@ -49,7 +49,7 @@ public:
     PacketInterceptor();
     ~PacketInterceptor();
     std::vector<NetworkAdapter> GetNetworkAdapters();
-    bool Initialize(const std::string& preferredAdapterIp = "");  // Оставляем только одну версию с параметром по умолчанию
+    bool Initialize(const std::string& preferredAdapterIp = "");  // ГЋГ±ГІГ ГўГ«ГїГҐГ¬ ГІГ®Г«ГјГЄГ® Г®Г¤Г­Гі ГўГҐГ°Г±ГЁГѕ Г± ГЇГ Г°Г Г¬ГҐГІГ°Г®Г¬ ГЇГ® ГіГ¬Г®Г«Г·Г Г­ГЁГѕ
     bool StartCapture();
     void StopCapture();
 

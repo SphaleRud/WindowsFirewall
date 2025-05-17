@@ -59,18 +59,18 @@ std::vector<NetworkAdapter> PacketInterceptor::GetNetworkAdapters() {
                 if (pUnicast != NULL && pUnicast->Address.lpSockaddr != NULL) {
                     NetworkAdapter adapter;
 
-                    // Получаем имя адаптера
+                    // ГЏГ®Г«ГіГ·Г ГҐГ¬ ГЁГ¬Гї Г Г¤Г ГЇГІГҐГ°Г 
                     adapter.name = pCurrAddresses->FriendlyName;
                     adapter.description = pCurrAddresses->Description;
                     adapter.isWifi = IsWifiAdapter(pCurrAddresses);
 
-                    // Получаем IP адрес
+                    // ГЏГ®Г«ГіГ·Г ГҐГ¬ IP Г Г¤Г°ГҐГ±
                     char ipStr[46];
                     sockaddr_in* sockaddr = (sockaddr_in*)pUnicast->Address.lpSockaddr;
                     inet_ntop(AF_INET, &sockaddr->sin_addr, ipStr, sizeof(ipStr));
                     adapter.ipAddress = ipStr;
 
-                    // Исключаем виртуальные адаптеры
+                    // Г€Г±ГЄГ«ГѕГ·Г ГҐГ¬ ГўГЁГ°ГІГіГ Г«ГјГ­Г»ГҐ Г Г¤Г ГЇГІГҐГ°Г»
                     if (adapter.name.find(L"Radmin") == std::wstring::npos &&
                         adapter.name.find(L"VPN") == std::wstring::npos &&
                         adapter.name.find(L"Virtual") == std::wstring::npos) {
@@ -92,17 +92,17 @@ bool PacketInterceptor::Initialize(const std::string& preferredAdapterIp) {
         return false;
     }
 
-    // Получаем список адаптеров
+    // ГЏГ®Г«ГіГ·Г ГҐГ¬ Г±ГЇГЁГ±Г®ГЄ Г Г¤Г ГЇГІГҐГ°Г®Гў
     std::vector<NetworkAdapter> adapters = GetNetworkAdapters();
     if (adapters.empty()) {
         WSACleanup();
         return false;
     }
 
-    // Ищем предпочтительный адаптер
+    // Г€Г№ГҐГ¬ ГЇГ°ГҐГ¤ГЇГ®Г·ГІГЁГІГҐГ«ГјГ­Г»Г© Г Г¤Г ГЇГІГҐГ°
     NetworkAdapter* selectedAdapter = nullptr;
 
-    // Сначала ищем по указанному IP
+    // Г‘Г­Г Г·Г Г«Г  ГЁГ№ГҐГ¬ ГЇГ® ГіГЄГ Г§Г Г­Г­Г®Г¬Гі IP
     if (!preferredAdapterIp.empty()) {
         for (auto& adapter : adapters) {
             if (adapter.ipAddress == preferredAdapterIp) {
@@ -112,7 +112,7 @@ bool PacketInterceptor::Initialize(const std::string& preferredAdapterIp) {
         }
     }
 
-    // Если не нашли по IP, ищем Wi-Fi адаптер
+    // Г…Г±Г«ГЁ Г­ГҐ Г­Г ГёГ«ГЁ ГЇГ® IP, ГЁГ№ГҐГ¬ Wi-Fi Г Г¤Г ГЇГІГҐГ°
     if (!selectedAdapter) {
         for (auto& adapter : adapters) {
             if (adapter.isWifi) {
@@ -122,7 +122,7 @@ bool PacketInterceptor::Initialize(const std::string& preferredAdapterIp) {
         }
     }
 
-    // Если и Wi-Fi не нашли, берем первый доступный
+    // Г…Г±Г«ГЁ ГЁ Wi-Fi Г­ГҐ Г­Г ГёГ«ГЁ, ГЎГҐГ°ГҐГ¬ ГЇГҐГ°ГўГ»Г© Г¤Г®Г±ГІГіГЇГ­Г»Г©
     if (!selectedAdapter && !adapters.empty()) {
         selectedAdapter = &adapters[0];
     }
@@ -138,7 +138,7 @@ bool PacketInterceptor::Initialize(const std::string& preferredAdapterIp) {
         return false;
     }
 
-    // Привязываем сокет к выбранному адаптеру
+    // ГЏГ°ГЁГўГїГ§Г»ГўГ ГҐГ¬ Г±Г®ГЄГҐГІ ГЄ ГўГ»ГЎГ°Г Г­Г­Г®Г¬Гі Г Г¤Г ГЇГІГҐГ°Гі
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_port = 0;
@@ -150,7 +150,7 @@ bool PacketInterceptor::Initialize(const std::string& preferredAdapterIp) {
         return false;
     }
 
-    // Включаем промискуитетный режим
+    // Г‚ГЄГ«ГѕГ·Г ГҐГ¬ ГЇГ°Г®Г¬ГЁГ±ГЄГіГЁГІГҐГІГ­Г»Г© Г°ГҐГ¦ГЁГ¬
     DWORD optval = 1;
     if (setsockopt(rawSocket, IPPROTO_IP, IP_HDRINCL, (char*)&optval, sizeof(optval)) == SOCKET_ERROR) {
         int error = WSAGetLastError();
@@ -162,7 +162,7 @@ bool PacketInterceptor::Initialize(const std::string& preferredAdapterIp) {
         return false;
     }
 
-    // Включаем режим SIO_RCVALL
+    // Г‚ГЄГ«ГѕГ·Г ГҐГ¬ Г°ГҐГ¦ГЁГ¬ SIO_RCVALL
     DWORD rcvall = RCVALL_ON;
     DWORD bytesReturned = 0;
     if (WSAIoctl(rawSocket, SIO_RCVALL, &rcvall, sizeof(rcvall),
@@ -209,7 +209,7 @@ void PacketInterceptor::UpdateConnection(const PacketInfo& info) {
             conn.description = ResolveDestination(info.destIP);
         }
 
-        // Очистка старых соединений
+        // ГЋГ·ГЁГ±ГІГЄГ  Г±ГІГ Г°Г»Гµ Г±Г®ГҐГ¤ГЁГ­ГҐГ­ГЁГ©
         time_t now = time(nullptr);
         for (auto it = connections.begin(); it != connections.end();) {
             if (now - it->second.lastUpdate > 300) {
@@ -229,7 +229,7 @@ void PacketInterceptor::ProcessPacket(const char* buffer, int length) {
 
     PacketInfo info;
 
-    // Получаем текущее время
+    // ГЏГ®Г«ГіГ·Г ГҐГ¬ ГІГҐГЄГіГ№ГҐГҐ ГўГ°ГҐГ¬Гї
     time_t now = time(nullptr);
     struct tm timeinfo;
     localtime_s(&timeinfo, &now);
@@ -243,15 +243,15 @@ void PacketInterceptor::ProcessPacket(const char* buffer, int length) {
         timeinfo.tm_sec);
     info.time = timeStr;
 
-    // Преобразуем IP адреса
-    char sourceIP[46], destIP[46];  // Увеличиваем буфер для IPv6
+    // ГЏГ°ГҐГ®ГЎГ°Г Г§ГіГҐГ¬ IP Г Г¤Г°ГҐГ±Г 
+    char sourceIP[46], destIP[46];  // Г“ГўГҐГ«ГЁГ·ГЁГўГ ГҐГ¬ ГЎГіГґГҐГ° Г¤Г«Гї IPv6
     void* srcAddr = const_cast<void*>(reinterpret_cast<const void*>(&ipHeader->sourceIP));
     void* dstAddr = const_cast<void*>(reinterpret_cast<const void*>(&ipHeader->destIP));
 
     inet_ntop(AF_INET, srcAddr, sourceIP, sizeof(sourceIP));
     inet_ntop(AF_INET, dstAddr, destIP, sizeof(destIP));
 
-    // Конвертируем в широкие строки
+    // ГЉГ®Г­ГўГҐГ°ГІГЁГ°ГіГҐГ¬ Гў ГёГЁГ°Г®ГЄГЁГҐ Г±ГІГ°Г®ГЄГЁ
     wchar_t wsourceIP[46], wdestIP[46];
     mbstowcs_s(nullptr, wsourceIP, sourceIP, _countof(wsourceIP));
     mbstowcs_s(nullptr, wdestIP, destIP, _countof(wdestIP));
@@ -261,7 +261,7 @@ void PacketInterceptor::ProcessPacket(const char* buffer, int length) {
     info.protocol = GetProtocolName(static_cast<IPPROTO>(ipHeader->protocol));
     info.action = L"Allowed";
 
-    // Обновляем информацию о соединении
+    // ГЋГЎГ­Г®ГўГ«ГїГҐГ¬ ГЁГ­ГґГ®Г°Г¬Г Г¶ГЁГѕ Г® Г±Г®ГҐГ¤ГЁГ­ГҐГ­ГЁГЁ
     UpdateConnection(info);
 
     bool shouldNotify = false;
@@ -284,13 +284,13 @@ bool PacketInterceptor::StartCapture() {
         return false;
     }
 
-    // Принудительно закрываем старый сокет и инициализируем новый
+    // ГЏГ°ГЁГ­ГіГ¤ГЁГІГҐГ«ГјГ­Г® Г§Г ГЄГ°Г»ГўГ ГҐГ¬ Г±ГІГ Г°Г»Г© Г±Г®ГЄГҐГІ ГЁ ГЁГ­ГЁГ¶ГЁГ Г«ГЁГ§ГЁГ°ГіГҐГ¬ Г­Г®ГўГ»Г©
     if (rawSocket != INVALID_SOCKET) {
         closesocket(rawSocket);
         rawSocket = INVALID_SOCKET;
     }
 
-    // Переинициализируем сокет
+    // ГЏГҐГ°ГҐГЁГ­ГЁГ¶ГЁГ Г«ГЁГ§ГЁГ°ГіГҐГ¬ Г±Г®ГЄГҐГІ
     if (!Initialize()) {
         return false;
     }
@@ -321,7 +321,7 @@ void PacketInterceptor::StopCapture() {
 
     isRunning = false;
 
-    // Закрываем сокет, чтобы прервать recv()
+    // Г‡Г ГЄГ°Г»ГўГ ГҐГ¬ Г±Г®ГЄГҐГІ, Г·ГІГ®ГЎГ» ГЇГ°ГҐГ°ГўГ ГІГј recv()
     if (rawSocket != INVALID_SOCKET) {
         shutdown(rawSocket, SD_BOTH);
         closesocket(rawSocket);
@@ -329,9 +329,9 @@ void PacketInterceptor::StopCapture() {
     }
 
     if (captureThreadHandle != NULL) {
-        // Ждем завершения потока с таймаутом
+        // Г†Г¤ГҐГ¬ Г§Г ГўГҐГ°ГёГҐГ­ГЁГї ГЇГ®ГІГ®ГЄГ  Г± ГІГ Г©Г¬Г ГіГІГ®Г¬
         if (WaitForSingleObject(captureThreadHandle, 1000) == WAIT_TIMEOUT) {
-            // Если поток не завершился за секунду, принудительно завершаем его
+            // Г…Г±Г«ГЁ ГЇГ®ГІГ®ГЄ Г­ГҐ Г§Г ГўГҐГ°ГёГЁГ«Г±Гї Г§Г  Г±ГҐГЄГіГ­Г¤Гі, ГЇГ°ГЁГ­ГіГ¤ГЁГІГҐГ«ГјГ­Г® Г§Г ГўГҐГ°ГёГ ГҐГ¬ ГҐГЈГ®
             TerminateThread(captureThreadHandle, 0);
         }
         CloseHandle(captureThreadHandle);
@@ -342,9 +342,9 @@ void PacketInterceptor::StopCapture() {
 DWORD WINAPI PacketInterceptor::CaptureThread(LPVOID param) {
     PacketInterceptor* interceptor = static_cast<PacketInterceptor*>(param);
     char buffer[65536];
-    int timeout = 100; // 100 мс таймаут
+    int timeout = 100; // 100 Г¬Г± ГІГ Г©Г¬Г ГіГІ
 
-    // Устанавливаем таймаут для recv
+    // Г“Г±ГІГ Г­Г ГўГ«ГЁГўГ ГҐГ¬ ГІГ Г©Г¬Г ГіГІ Г¤Г«Гї recv
     setsockopt(interceptor->rawSocket, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
 
     while (interceptor->isRunning) {
@@ -355,7 +355,7 @@ DWORD WINAPI PacketInterceptor::CaptureThread(LPVOID param) {
         else if (bytesRead == SOCKET_ERROR) {
             int error = WSAGetLastError();
             if (error != WSAEWOULDBLOCK && error != WSAETIMEDOUT) {
-                if (interceptor->isRunning) { // Выводим ошибку только если это не плановая остановка
+                if (interceptor->isRunning) { // Г‚Г»ГўГ®Г¤ГЁГ¬ Г®ГёГЁГЎГЄГі ГІГ®Г«ГјГЄГ® ГҐГ±Г«ГЁ ГЅГІГ® Г­ГҐ ГЇГ«Г Г­Г®ГўГ Гї Г®Г±ГІГ Г­Г®ГўГЄГ 
                     wchar_t errorMsg[256];
                     swprintf_s(errorMsg, L"Socket error: %d\n", error);
                     OutputDebugString(errorMsg);
@@ -363,7 +363,7 @@ DWORD WINAPI PacketInterceptor::CaptureThread(LPVOID param) {
                 break;
             }
         }
-        Sleep(1); // Небольшая задержка
+        Sleep(1); // ГЌГҐГЎГ®Г«ГјГёГ Гї Г§Г Г¤ГҐГ°Г¦ГЄГ 
     }
 
     return 0;

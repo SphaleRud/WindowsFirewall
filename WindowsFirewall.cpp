@@ -43,44 +43,28 @@ Cleanup:
     return fIsRunAsAdmin;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-    LPSTR lpCmdLine, int nCmdShow) {
-    if (!IsRunAsAdmin()) {
-        MessageBox(NULL, L"This application must be run as administrator",
-            L"Administrator Rights Required", MB_OK | MB_ICONERROR);
-        return 1;
+int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE hPrevInstance,
+    _In_ LPWSTR    lpCmdLine,
+    _In_ int       nCmdShow)
+{
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+
+    MainWindow& mainWindow = MainWindow::Instance(hInstance);
+
+    if (!mainWindow.Initialize()) {
+        return FALSE;
     }
 
-    // Создаем директорию для логов, если её нет
-    CreateDirectory(L"logs", NULL);
-
-    // Инициализируем логгер
-    Logger::Instance().Initialize("logs/firewall.log");
-
-    // Инициализируем перехватчик пакетов
-    auto interceptor = std::make_shared<PacketInterceptor>();
-    if (!interceptor->Initialize()) {
-        MessageBox(NULL, L"Failed to initialize Packet Interceptor.\nMake sure you run as Administrator.",
-            L"Error", MB_OK | MB_ICONERROR);
-        return 1;
+    if (!mainWindow.Create()) {
+        return FALSE;
     }
 
-    // Инициализируем главное окно
-    if (!MainWindow::Instance().Initialize(hInstance, nCmdShow)) {
-        MessageBox(NULL, L"Failed to initialize Main Window",
-            L"Error", MB_OK | MB_ICONERROR);
-        return 1;
-    }
+    mainWindow.Show(nCmdShow);
 
-    // Устанавливаем перехватчик пакетов
-    MainWindow::Instance().SetPacketInterceptor(interceptor);
-
-    // Показываем главное окно и запускаем цикл сообщений
-    MainWindow::Instance().Show();
-
-    // Основной цикл сообщений
     MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
+    while (GetMessage(&msg, nullptr, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }

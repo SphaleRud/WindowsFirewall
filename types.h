@@ -53,39 +53,55 @@ struct LogEntry {
 };
 
 struct PacketInfo {
-    std::wstring time;
-    std::wstring sourceIP;
-    std::wstring destIP;
-    std::wstring protocol;
-    std::wstring action;
+    std::string sourceIp;
+    std::string destIp;
+    uint16_t sourcePort;
+    uint16_t destPort;
+    std::string protocol;
+    uint64_t bytesSent;
+    std::string direction;  // "IN" или "OUT"
+    std::string application;
+    SYSTEMTIME timestamp;
+};
+
+struct NetworkAdapter {
+    std::string name;
+    std::string description;
+    std::string ipAddress;
+    bool isWifi;
 };
 
 #pragma pack(push, 1)
 struct IPHeader {
-    unsigned char headerLength : 4;
-    unsigned char version : 4;
-    unsigned char typeOfService;
+    unsigned char  headerLength : 4;
+    unsigned char  version : 4;
+    unsigned char  typeOfService;
     unsigned short totalLength;
-    unsigned short id;
+    unsigned short identification;
     unsigned short fragmentOffset;
-    unsigned char timeToLive;
-    unsigned char protocol;
-    unsigned short checksum;
-    unsigned long sourceIP;
-    unsigned long destIP;
+    unsigned char  timeToLive;
+    unsigned char  protocol;
+    unsigned short headerChecksum;
+    unsigned long  sourceIP;
+    unsigned long  destIP;
 };
 
 struct TCPHeader {
     unsigned short sourcePort;
     unsigned short destPort;
-    unsigned long sequence;
-    unsigned long acknowledge;
-    unsigned char offset : 4;
-    unsigned char reserved : 4;
-    unsigned char flags;
+    unsigned long  sequenceNumber;
+    unsigned long  acknowledgementNumber;
+    unsigned char  dataOffset;
+    unsigned char  flags;
     unsigned short window;
     unsigned short checksum;
     unsigned short urgentPointer;
 };
-#pragma pack(pop)
 
+struct UDPHeader {
+    unsigned short sourcePort;
+    unsigned short destPort;
+    unsigned short length;
+    unsigned short checksum;
+};
+#pragma pack(pop)

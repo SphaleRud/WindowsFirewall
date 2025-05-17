@@ -1,87 +1,58 @@
 #pragma once
 #define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <windows.h>
-#include <ws2tcpip.h>
+#include <Windows.h>
+#include <WinSock2.h>
+#include <WS2tcpip.h>
 #include <iphlpapi.h>
-#include <functional>
 #include <string>
-#include <unordered_map>
+#include <vector>
 #include <mutex>
+#include <map>
+#include <functional>
 #include "types.h"
 
-struct ConnectionKey {
-    std::wstring sourceIP;
-    std::wstring destIP;
-    std::wstring protocol;
-
-    bool operator==(const ConnectionKey& other) const {
-        return sourceIP == other.sourceIP &&
-            destIP == other.destIP &&
-            protocol == other.protocol;
-    }
-};
-
-struct ConnectionKeyHash {
-    size_t operator()(const ConnectionKey& key) const {
-        return std::hash<std::wstring>()(key.sourceIP) ^
-            std::hash<std::wstring>()(key.destIP) ^
-            std::hash<std::wstring>()(key.protocol);
-    }
-};
-
-struct ConnectionInfo {
-    int packetCount;
-    std::wstring lastSeen;
-    std::wstring description;
-    time_t lastUpdate;
-};
-
-struct NetworkAdapter {
-    std::wstring name;
-    std::wstring description;
-    std::string ipAddress;
-    bool isWifi;
-};
+#pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "iphlpapi.lib")
 
 class PacketInterceptor {
 public:
     PacketInterceptor();
-    ~PacketInterceptor();
-    std::vector<NetworkAdapter> GetNetworkAdapters();
-    bool Initialize(const std::string& preferredAdapterIp = "");  // ГЋГ±ГІГ ГўГ«ГїГҐГ¬ ГІГ®Г«ГјГЄГ® Г®Г¤Г­Гі ГўГҐГ°Г±ГЁГѕ Г± ГЇГ Г°Г Г¬ГҐГІГ°Г®Г¬ ГЇГ® ГіГ¬Г®Г«Г·Г Г­ГЁГѕ
+    virtual ~PacketInterceptor();
+
+    bool Initialize(const std::string& preferredAdapterIp = "");
     bool StartCapture();
     void StopCapture();
+    bool SwitchAdapter(const std::string& ipAddress);
+    void SetPacketCallback(const std::function<void(const PacketInfo&)>& callback);
+    std::vector<NetworkAdapter> GetNetworkAdapters();
 
-    void SetPacketCallback(std::function<void(const PacketInfo&)> callback) {
-        packetCallback = callback;
-    }
+    // Пример конвертации, если она необходима
+    std::string WideToAnsi(const wchar_t* wstr) {
+        if (!wstr) return "";
 
-    std::wstring GetConnectionDescription(const PacketInfo& info) {
-        ConnectionKey key{ info.sourceIP, info.destIP, info.protocol };
-        std::lock_guard<std::mutex> lock(connectionsMutex);
-        auto it = connections.find(key);
-        if (it != connections.end()) {
-            return it->second.description;
+        int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, nullptr, 0, nullptr, nullptr);
+        std::string strTo(size_needed, 0);
+        WideCharToMultiByte(CP_UTF8, 0, wstr, -1, &strTo[0], size_needed, nullptr, nullptr);
+        if (!strTo.empty() && strTo.back() == 0) {
+            strTo.pop_back(); // Удаляем завершающий нуль
         }
-        return L"Unknown";
+        return strTo;
     }
-
-    
-
+protected:
+    bool IsLocalAddress(const std::string& ipAddress);
+    std::string GetProcessNameById(DWORD processId);
+    DWORD GetProcessIdByPort(WORD port, const std::string& protocol);
+    void ProcessPacket(const char* data, int size);
+    std::string ResolveDestination(const std::string& ip);
 private:
     bool isRunning;
     SOCKET rawSocket;
     HANDLE captureThreadHandle;
     std::function<void(const PacketInfo&)> packetCallback;
-
-    std::unordered_map<ConnectionKey, ConnectionInfo, ConnectionKeyHash> connections;
     std::mutex connectionsMutex;
 
     static DWORD WINAPI CaptureThread(LPVOID param);
-    void ProcessPacket(const char* buffer, int length);
     std::wstring GetProtocolName(IPPROTO protocol);
-    std::wstring ResolveDestination(const std::wstring& ip);
     void UpdateConnection(const PacketInfo& info);
 
     bool IsWifiAdapter(PIP_ADAPTER_ADDRESSES adapter);

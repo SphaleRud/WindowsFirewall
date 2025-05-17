@@ -15,9 +15,15 @@
 #define IDC_MYICON				2
 #ifndef IDC_STATIC
 #define IDC_STATIC				-1
-#define ID_SELECT_ADAPTER     40001
-#define IDD_ADAPTER_DIALOG    101
-#define IDC_ADAPTER_COMBO     1001
+#define IDM_MAIN_MENU        129
+#define IDM_ADAPTER_MENU     130
+#define IDD_ADAPTER_DIALOG   131
+#define IDC_ADAPTER_COMBO    1001
+#define ID_SELECT_ADAPTER    40001
+#define IDM_START_CAPTURE    40002
+#define IDM_STOP_CAPTURE     40003
+#define IDM_ADD_RULE         40004
+#define IDM_DELETE_RULE      40005
 #endif
 // Next default values for new objects
 //

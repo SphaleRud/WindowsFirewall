@@ -1,372 +1,337 @@
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#include "packetinterceptor.h"
-#include "types.h"
-#include <time.h>
+#define HAVE_REMOTE
+#define WPCAP
+#include <SDKDDKVer.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#define inline __inline
+#include <pcap.h>
+#undef inline
+#include <algorithm>
+#include <netioapi.h>
+#include <timeapi.h>
 #include <iphlpapi.h>
-#include <iostream>
-#include <mutex>
+#include "packetinterceptor.h"
+#include "logger.h"
 
-#pragma comment(lib, "iphlpapi.lib")
+
+#pragma comment(lib, "wpcap.lib")
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "iphlpapi.lib")
 
-PacketInterceptor::PacketInterceptor() :
-    isRunning(false),
-    rawSocket(INVALID_SOCKET),
-    captureThreadHandle(NULL),
-    packetCallback(nullptr) {
+#define PCAP_NETMASK_UNKNOWN    0xffffffff
+
+
+PacketInterceptor::PacketInterceptor()
+    : pcapHandle(nullptr)
+    , isCapturing(false)
+    , isRunning(false)
+    , rawSocket(INVALID_SOCKET) {
 }
 
 PacketInterceptor::~PacketInterceptor() {
     StopCapture();
+    if (pcapHandle) {
+        pcap_close(pcapHandle);
+    }
     if (rawSocket != INVALID_SOCKET) {
         closesocket(rawSocket);
-        rawSocket = INVALID_SOCKET;
     }
-    WSACleanup();
 }
 
-std::wstring PacketInterceptor::GetProtocolName(IPPROTO protocol) {
+std::string PacketInterceptor::GetConnectionDescription(const PacketInfo& info) const {
+    std::lock_guard<std::mutex> lock(mutex);
+    std::string key = info.sourceIp + ":" + std::to_string(info.sourcePort) + "-" +
+        info.destIp + ":" + std::to_string(info.destPort);
+
+    auto it = connections.find(key);
+    if (it != connections.end()) {
+        return it->second;
+    }
+
+    // Если соединение не найдено, возвращаем базовое описание
+    return info.destIp + ":" + std::to_string(info.destPort) + " (" + ResolveDestination(info.destIp) + ")";
+}
+
+bool PacketInterceptor::SetCurrentAdapter(const std::string& adapterName) {
+    if (isCapturing) {
+        StopCapture();
+    }
+
+    currentAdapter = adapterName;
+    return true;
+}
+
+// Методы для работы с протоколами и адаптерами
+std::string PacketInterceptor::GetProtocolName(int protocol) const {
     switch (protocol) {
-    case IPPROTO_TCP:
-        return L"TCP";
-    case IPPROTO_UDP:
-        return L"UDP";
-    case IPPROTO_ICMP:
-        return L"ICMP";
-    default:
-        return std::to_wstring(static_cast<int>(protocol));
+    case IPPROTO_TCP: return "TCP";
+    case IPPROTO_UDP: return "UDP";
+    case IPPROTO_ICMP: return "ICMP";
+    default: return "Unknown";
     }
 }
 
-bool PacketInterceptor::IsWifiAdapter(PIP_ADAPTER_ADDRESSES adapter) {
-    return adapter->IfType == IF_TYPE_IEEE80211;
+bool PacketInterceptor::IsWifiAdapter(const std::string& name) const {
+    // Преобразуем строку в нижний регистр для поиска
+    std::string lowerName = name;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+
+    // Ищем ключевые слова, указывающие на WiFi адаптер
+    return lowerName.find("wireless") != std::string::npos ||
+        lowerName.find("wifi") != std::string::npos ||
+        lowerName.find("802.11") != std::string::npos;
 }
 
-std::vector<NetworkAdapter> PacketInterceptor::GetNetworkAdapters() {
+std::vector<NetworkAdapter> PacketInterceptor::GetNetworkAdapters() const {
     std::vector<NetworkAdapter> adapters;
+    pcap_if_t* alldevs;
+    char errbuf[PCAP_ERRBUF_SIZE];
 
-    ULONG outBufLen = 0;
-    GetAdaptersAddresses(AF_INET, 0, NULL, NULL, &outBufLen);
-
-    PIP_ADAPTER_ADDRESSES pAddresses = (PIP_ADAPTER_ADDRESSES)malloc(outBufLen);
-    if (GetAdaptersAddresses(AF_INET, 0, NULL, pAddresses, &outBufLen) == ERROR_SUCCESS) {
-        PIP_ADAPTER_ADDRESSES pCurrAddresses = pAddresses;
-
-        while (pCurrAddresses) {
-            if (pCurrAddresses->OperStatus == IfOperStatusUp) {
-                PIP_ADAPTER_UNICAST_ADDRESS pUnicast = pCurrAddresses->FirstUnicastAddress;
-
-                if (pUnicast != NULL && pUnicast->Address.lpSockaddr != NULL) {
-                    NetworkAdapter adapter;
-
-                    // Ïîëó÷àåì èìÿ àäàïòåðà
-                    adapter.name = pCurrAddresses->FriendlyName;
-                    adapter.description = pCurrAddresses->Description;
-                    adapter.isWifi = IsWifiAdapter(pCurrAddresses);
-
-                    // Ïîëó÷àåì IP àäðåñ
-                    char ipStr[46];
-                    sockaddr_in* sockaddr = (sockaddr_in*)pUnicast->Address.lpSockaddr;
-                    inet_ntop(AF_INET, &sockaddr->sin_addr, ipStr, sizeof(ipStr));
-                    adapter.ipAddress = ipStr;
-
-                    // Èñêëþ÷àåì âèðòóàëüíûå àäàïòåðû
-                    if (adapter.name.find(L"Radmin") == std::wstring::npos &&
-                        adapter.name.find(L"VPN") == std::wstring::npos &&
-                        adapter.name.find(L"Virtual") == std::wstring::npos) {
-                        adapters.push_back(adapter);
-                    }
-                }
-            }
-            pCurrAddresses = pCurrAddresses->Next;
-        }
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+        return adapters;
     }
 
-    free(pAddresses);
+    for (pcap_if_t* d = alldevs; d != nullptr; d = d->next) {
+        NetworkAdapter adapter;
+        adapter.name = d->name;
+        adapter.description = d->description ? d->description : "No description available";
+        adapters.push_back(adapter);
+    }
+
+    pcap_freealldevs(alldevs);
     return adapters;
 }
 
-bool PacketInterceptor::Initialize(const std::string& preferredAdapterIp) {
-    WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+bool PacketInterceptor::IsCapturing() const {
+    return isCapturing;
+}
+
+bool PacketInterceptor::Initialize() {
+    isCapturing = false;
+    handle = nullptr;
+    return true;
+}
+
+bool PacketInterceptor::StartCapture() {
+    if (isCapturing || currentAdapter.empty()) {
         return false;
     }
 
-    // Ïîëó÷àåì ñïèñîê àäàïòåðîâ
-    std::vector<NetworkAdapter> adapters = GetNetworkAdapters();
-    if (adapters.empty()) {
-        WSACleanup();
+    char errbuf[PCAP_ERRBUF_SIZE];
+    handle = pcap_open_live(currentAdapter.c_str(), 65536, 1, 1000, errbuf);
+    if (!handle) {
         return false;
     }
 
-    // Èùåì ïðåäïî÷òèòåëüíûé àäàïòåð
-    NetworkAdapter* selectedAdapter = nullptr;
+    isCapturing = true;
+    // Запускаем поток для захвата пакетов
+    captureThread = std::thread(&PacketInterceptor::CaptureThread, this);
+    captureThread.detach();
 
-    // Ñíà÷àëà èùåì ïî óêàçàííîìó IP
-    if (!preferredAdapterIp.empty()) {
-        for (auto& adapter : adapters) {
-            if (adapter.ipAddress == preferredAdapterIp) {
-                selectedAdapter = &adapter;
-                break;
-            }
-        }
-    }
+    return true;
+}
 
-    // Åñëè íå íàøëè ïî IP, èùåì Wi-Fi àäàïòåð
-    if (!selectedAdapter) {
-        for (auto& adapter : adapters) {
-            if (adapter.isWifi) {
-                selectedAdapter = &adapter;
-                break;
-            }
-        }
-    }
 
-    // Åñëè è Wi-Fi íå íàøëè, áåðåì ïåðâûé äîñòóïíûé
-    if (!selectedAdapter && !adapters.empty()) {
-        selectedAdapter = &adapters[0];
-    }
 
-    if (!selectedAdapter) {
-        WSACleanup();
+bool PacketInterceptor::StopCapture() {
+    if (!isCapturing) {
         return false;
     }
 
-    this->rawSocket = socket(AF_INET, SOCK_RAW, IPPROTO_IP);
-    if (this->rawSocket == INVALID_SOCKET) {
-        WSACleanup();
-        return false;
-    }
-
-    // Ïðèâÿçûâàåì ñîêåò ê âûáðàííîìó àäàïòåðó
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_port = 0;
-    inet_pton(AF_INET, selectedAdapter->ipAddress.c_str(), &addr.sin_addr);
-
-    if (bind(this->rawSocket, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        closesocket(this->rawSocket);
-        WSACleanup();
-        return false;
-    }
-
-    // Âêëþ÷àåì ïðîìèñêóèòåòíûé ðåæèì
-    DWORD optval = 1;
-    if (setsockopt(rawSocket, IPPROTO_IP, IP_HDRINCL, (char*)&optval, sizeof(optval)) == SOCKET_ERROR) {
-        int error = WSAGetLastError();
-        wchar_t errorMsg[256];
-        swprintf_s(errorMsg, L"Failed to set IP_HDRINCL. Error code: %d", error);
-        MessageBox(NULL, errorMsg, L"Error", MB_OK | MB_ICONERROR);
-        closesocket(rawSocket);
-        WSACleanup();
-        return false;
-    }
-
-    // Âêëþ÷àåì ðåæèì SIO_RCVALL
-    DWORD rcvall = RCVALL_ON;
-    DWORD bytesReturned = 0;
-    if (WSAIoctl(rawSocket, SIO_RCVALL, &rcvall, sizeof(rcvall),
-        NULL, 0, &bytesReturned, NULL, NULL) == SOCKET_ERROR) {
-        int error = WSAGetLastError();
-        wchar_t errorMsg[256];
-        swprintf_s(errorMsg, L"Failed to set RCVALL mode. Error code: %d", error);
-        MessageBox(NULL, errorMsg, L"Error", MB_OK | MB_ICONERROR);
-        closesocket(rawSocket);
-        WSACleanup();
-        return false;
+    isCapturing = false;
+    if (handle) {
+        pcap_breakloop(handle);
+        pcap_close(handle);
+        handle = nullptr;
     }
 
     return true;
 }
 
-std::wstring PacketInterceptor::ResolveDestination(const std::wstring& ip) {
-    static const std::unordered_map<std::wstring, std::wstring> knownServices = {
-        {L"172.217.", L"Google"},
-        {L"13.107.", L"Microsoft"},
-    };
 
-    for (const auto& service : knownServices) {
-        if (ip.find(service.first) == 0) {
-            return service.second;
-        }
+void PacketInterceptor::CaptureThread() {
+    if (!handle) return;
+
+    struct pcap_pkthdr* header;
+    const u_char* pkt_data;
+    int res;
+
+    while (isCapturing && (res = pcap_next_ex(handle, &header, &pkt_data)) >= 0) {
+        if (res == 0) continue; // Timeout
+
+        // Обработка пакета
+        ProcessPacket(header, pkt_data);
     }
-
-    return L"Unknown";
 }
 
+
+std::string PacketInterceptor::ResolveDestination(const std::string& ip) const {
+    char host[NI_MAXHOST];
+    struct sockaddr_in sa;
+    sa.sin_family = AF_INET;
+    inet_pton(AF_INET, ip.c_str(), &(sa.sin_addr));
+
+    if (getnameinfo((struct sockaddr*)&sa, sizeof(sa),
+        host, NI_MAXHOST,
+        NULL, 0,
+        NI_NAMEREQD) == 0) {
+        return std::string(host);
+    }
+
+    return ip; // Возвращаем IP если резолвинг не удался
+}
 void PacketInterceptor::UpdateConnection(const PacketInfo& info) {
-    ConnectionKey key{ info.sourceIP, info.destIP, info.protocol };
+    std::lock_guard<std::mutex> lock(mutex);
+    std::string key = info.sourceIp + ":" + std::to_string(info.sourcePort) + "-" +
+        info.destIp + ":" + std::to_string(info.destPort);
+    connections[key] = info.processName;
+}
 
-    {
-        std::lock_guard<std::mutex> lock(connectionsMutex);
+std::string PacketInterceptor::GetServiceName(unsigned short port) const {
+    auto it = knownServices.find(port);
+    return it != knownServices.end() ? it->second : "Unknown";
+}
 
-        auto& conn = connections[key];
-        conn.packetCount++;
-        conn.lastSeen = info.time;
-        conn.lastUpdate = time(nullptr);
+bool PacketInterceptor::IsOutgoingPacket(const std::string& sourceIp) const {
+    return sourceIp == currentAdapterIp;
+}
 
-        if (conn.description.empty()) {
-            conn.description = ResolveDestination(info.destIP);
-        }
+std::string PacketInterceptor::GetProcessNameByPort(unsigned short port) {
+    // Используем GetExtendedTcpTable для получения информации о процессах
+    DWORD size = 0;
+    GetExtendedTcpTable(nullptr, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
 
-        // Î÷èñòêà ñòàðûõ ñîåäèíåíèé
-        time_t now = time(nullptr);
-        for (auto it = connections.begin(); it != connections.end();) {
-            if (now - it->second.lastUpdate > 300) {
-                it = connections.erase(it);
-            }
-            else {
-                ++it;
+    std::vector<char> buffer(size);
+    PMIB_TCPTABLE_OWNER_PID tcpTable = reinterpret_cast<PMIB_TCPTABLE_OWNER_PID>(&buffer[0]);
+
+    if (GetExtendedTcpTable(tcpTable, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
+        for (DWORD i = 0; i < tcpTable->dwNumEntries; i++) {
+            if (ntohs(tcpTable->table[i].dwLocalPort) == port) {
+                HANDLE processHandle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, tcpTable->table[i].dwOwningPid);
+                if (processHandle) {
+                    char processName[MAX_PATH];
+                    DWORD size = sizeof(processName);
+                    if (QueryFullProcessImageNameA(processHandle, 0, processName, &size)) {
+                        CloseHandle(processHandle);
+                        return std::string(processName);
+                    }
+                    CloseHandle(processHandle);
+                }
             }
         }
     }
+
+    // Проверяем UDP соединения
+    GetExtendedUdpTable(nullptr, &size, TRUE, AF_INET, UDP_TABLE_OWNER_PID, 0);
+    buffer.resize(size);
+    PMIB_UDPTABLE_OWNER_PID udpTable = reinterpret_cast<PMIB_UDPTABLE_OWNER_PID>(&buffer[0]);
+
+    if (GetExtendedUdpTable(udpTable, &size, TRUE, AF_INET, UDP_TABLE_OWNER_PID, 0) == NO_ERROR) {
+        for (DWORD i = 0; i < udpTable->dwNumEntries; i++) {
+            if (ntohs(udpTable->table[i].dwLocalPort) == port) {
+                HANDLE processHandle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, udpTable->table[i].dwOwningPid);
+                if (processHandle) {
+                    char processName[MAX_PATH];
+                    DWORD size = sizeof(processName);
+                    if (QueryFullProcessImageNameA(processHandle, 0, processName, &size)) {
+                        CloseHandle(processHandle);
+                        return std::string(processName);
+                    }
+                    CloseHandle(processHandle);
+                }
+            }
+        }
+    }
+
+    return "Unknown";
 }
 
-void PacketInterceptor::ProcessPacket(const char* buffer, int length) {
-    if (length < sizeof(IPHeader)) return;
-
-    const IPHeader* ipHeader = reinterpret_cast<const IPHeader*>(buffer);
+void PacketInterceptor::ProcessPacket(const u_char* packet, int len) {
+    if (!packet || len < sizeof(IPHeader)) {
+        return;
+    }
 
     PacketInfo info;
+    info.timestamp = time(nullptr);
+    info.size = len;
 
-    // Ïîëó÷àåì òåêóùåå âðåìÿ
-    time_t now = time(nullptr);
-    struct tm timeinfo;
-    localtime_s(&timeinfo, &now);
-    wchar_t timeStr[64];
-    swprintf_s(timeStr, L"%04d-%02d-%02d %02d:%02d:%02d",
-        timeinfo.tm_year + 1900,
-        timeinfo.tm_mon + 1,
-        timeinfo.tm_mday,
-        timeinfo.tm_hour,
-        timeinfo.tm_min,
-        timeinfo.tm_sec);
-    info.time = timeStr;
+    // Получаем заголовок IP пакета
+    const IPHeader* ipHeader = reinterpret_cast<const IPHeader*>(packet);
 
-    // Ïðåîáðàçóåì IP àäðåñà
-    char sourceIP[46], destIP[46];  // Óâåëè÷èâàåì áóôåð äëÿ IPv6
-    void* srcAddr = const_cast<void*>(reinterpret_cast<const void*>(&ipHeader->sourceIP));
-    void* dstAddr = const_cast<void*>(reinterpret_cast<const void*>(&ipHeader->destIP));
+    // Преобразуем IP адреса
+    struct in_addr source, dest;
+    source.s_addr = ipHeader->sourceIP;
+    dest.s_addr = ipHeader->destIP;
 
-    inet_ntop(AF_INET, srcAddr, sourceIP, sizeof(sourceIP));
-    inet_ntop(AF_INET, dstAddr, destIP, sizeof(destIP));
+    char sourceIP[INET_ADDRSTRLEN];
+    char destIP[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &source, sourceIP, INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, &dest, destIP, INET_ADDRSTRLEN);
 
-    // Êîíâåðòèðóåì â øèðîêèå ñòðîêè
-    wchar_t wsourceIP[46], wdestIP[46];
-    mbstowcs_s(nullptr, wsourceIP, sourceIP, _countof(wsourceIP));
-    mbstowcs_s(nullptr, wdestIP, destIP, _countof(wdestIP));
+    info.sourceIp = sourceIP;
+    info.destIp = destIP;
+    info.protocol = GetProtocolName(ipHeader->protocol);
 
-    info.sourceIP = wsourceIP;
-    info.destIP = wdestIP;
-    info.protocol = GetProtocolName(static_cast<IPPROTO>(ipHeader->protocol));
-    info.action = L"Allowed";
+    // Определяем смещение для доступа к данным протокола транспортного уровня
+    int ipHeaderLength = ipHeader->headerLength * 4;
 
-    // Îáíîâëÿåì èíôîðìàöèþ î ñîåäèíåíèè
-    UpdateConnection(info);
+    // Обрабатываем TCP пакеты
+    if (ipHeader->protocol == IPPROTO_TCP && len >= (ipHeaderLength + sizeof(TCPHeader))) {
+        const TCPHeader* tcpHeader = reinterpret_cast<const TCPHeader*>(packet + ipHeaderLength);
+        info.sourcePort = ntohs(tcpHeader->sourcePort);
+        info.destPort = ntohs(tcpHeader->destPort);
 
-    bool shouldNotify = false;
-    {
-        std::lock_guard<std::mutex> lock(connectionsMutex);
-        auto it = connections.find(ConnectionKey{ info.sourceIP, info.destIP, info.protocol });
-        if (it != connections.end()) {
-            shouldNotify = (it->second.packetCount == 1 || it->second.packetCount % 100 == 0);
+        // Анализ флагов TCP
+        std::string flags;
+        if (tcpHeader->flags & 0x01) flags += "FIN ";
+        if (tcpHeader->flags & 0x02) flags += "SYN ";
+        if (tcpHeader->flags & 0x04) flags += "RST ";
+        if (tcpHeader->flags & 0x08) flags += "PSH ";
+        if (tcpHeader->flags & 0x10) flags += "ACK ";
+        if (tcpHeader->flags & 0x20) flags += "URG ";
+        info.flags = flags;
+        info.direction = IsOutgoingPacket(info.sourceIp) ? "Outgoing" : "Incoming";
+
+    }
+    // Обрабатываем UDP пакеты
+    else if (ipHeader->protocol == IPPROTO_UDP && len >= (ipHeaderLength + sizeof(UDPheader))) {
+        const UDPheader* udpHeader = reinterpret_cast<const UDPheader*>(packet + ipHeaderLength);
+        info.sourcePort = ntohs(udpHeader->source_port);
+        info.destPort = ntohs(udpHeader->dest_port);
+        info.flags = "";  // UDP не имеет флагов
+        info.direction = IsOutgoingPacket(info.sourceIp) ? "Outgoing" : "Incoming";
+
+    }
+    // Обрабатываем ICMP пакеты
+    else if (ipHeader->protocol == IPPROTO_ICMP && len >= (ipHeaderLength + sizeof(icmp_header))) {
+        const icmp_header* icmpHeader = reinterpret_cast<const icmp_header*>(packet + ipHeaderLength);
+        info.sourcePort = 0;
+        info.destPort = 0;
+
+        // Определение типа ICMP сообщения
+        std::string icmpType;
+        switch (icmpHeader->type) {
+        case ICMP_ECHOREPLY: icmpType = "Echo Reply"; break;
+        case ICMP_ECHO: icmpType = "Echo Request"; break;
+        case ICMP_DEST_UNREACH: icmpType = "Destination Unreachable"; break;
+        case ICMP_TIME_EXCEEDED: icmpType = "Time Exceeded"; break;
+        default: icmpType = "Other ICMP Type: " + std::to_string(icmpHeader->type);
         }
+        info.flags = icmpType;
+        info.direction = IsOutgoingPacket(info.sourceIp) ? "Outgoing" : "Incoming";
+        info.processName = "System";
     }
 
-    if (shouldNotify && packetCallback) {
+    // Пытаемся определить имя процесса
+    if (info.processName.empty()) {
+        info.processName = GetProcessNameByPort(info.sourcePort);
+    }
+
+    // Обновляем информацию о соединении
+    UpdateConnection(info);
+
+    // Вызываем callback с информацией о пакете
+    if (packetCallback) {
         packetCallback(info);
     }
 }
-
-
-bool PacketInterceptor::StartCapture() {
-    if (isRunning) {
-        return false;
-    }
-
-    // Ïðèíóäèòåëüíî çàêðûâàåì ñòàðûé ñîêåò è èíèöèàëèçèðóåì íîâûé
-    if (rawSocket != INVALID_SOCKET) {
-        closesocket(rawSocket);
-        rawSocket = INVALID_SOCKET;
-    }
-
-    // Ïåðåèíèöèàëèçèðóåì ñîêåò
-    if (!Initialize()) {
-        return false;
-    }
-
-    isRunning = true;
-
-    captureThreadHandle = CreateThread(
-        NULL,
-        0,
-        CaptureThread,
-        this,
-        0,
-        NULL
-    );
-
-    if (captureThreadHandle == NULL) {
-        isRunning = false;
-        closesocket(rawSocket);
-        rawSocket = INVALID_SOCKET;
-        return false;
-    }
-
-    return true;
-}
-
-void PacketInterceptor::StopCapture() {
-    if (!isRunning) return;
-
-    isRunning = false;
-
-    // Çàêðûâàåì ñîêåò, ÷òîáû ïðåðâàòü recv()
-    if (rawSocket != INVALID_SOCKET) {
-        shutdown(rawSocket, SD_BOTH);
-        closesocket(rawSocket);
-        rawSocket = INVALID_SOCKET;
-    }
-
-    if (captureThreadHandle != NULL) {
-        // Æäåì çàâåðøåíèÿ ïîòîêà ñ òàéìàóòîì
-        if (WaitForSingleObject(captureThreadHandle, 1000) == WAIT_TIMEOUT) {
-            // Åñëè ïîòîê íå çàâåðøèëñÿ çà ñåêóíäó, ïðèíóäèòåëüíî çàâåðøàåì åãî
-            TerminateThread(captureThreadHandle, 0);
-        }
-        CloseHandle(captureThreadHandle);
-        captureThreadHandle = NULL;
-    }
-}
-
-DWORD WINAPI PacketInterceptor::CaptureThread(LPVOID param) {
-    PacketInterceptor* interceptor = static_cast<PacketInterceptor*>(param);
-    char buffer[65536];
-    int timeout = 100; // 100 ìñ òàéìàóò
-
-    // Óñòàíàâëèâàåì òàéìàóò äëÿ recv
-    setsockopt(interceptor->rawSocket, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
-
-    while (interceptor->isRunning) {
-        int bytesRead = recv(interceptor->rawSocket, buffer, sizeof(buffer), 0);
-        if (bytesRead > 0) {
-            interceptor->ProcessPacket(buffer, bytesRead);
-        }
-        else if (bytesRead == SOCKET_ERROR) {
-            int error = WSAGetLastError();
-            if (error != WSAEWOULDBLOCK && error != WSAETIMEDOUT) {
-                if (interceptor->isRunning) { // Âûâîäèì îøèáêó òîëüêî åñëè ýòî íå ïëàíîâàÿ îñòàíîâêà
-                    wchar_t errorMsg[256];
-                    swprintf_s(errorMsg, L"Socket error: %d\n", error);
-                    OutputDebugString(errorMsg);
-                }
-                break;
-            }
-        }
-        Sleep(1); // Íåáîëüøàÿ çàäåðæêà
-    }
-
-    return 0;
-}
-
-

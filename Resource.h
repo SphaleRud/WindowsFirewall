@@ -14,10 +14,10 @@
 #define IDC_WINDOWSFIREWALL			109
 #define IDC_MYICON				2
 #ifndef IDC_STATIC
-#define IDC_STATIC				-1
-#define ID_SELECT_ADAPTER     40001
-#define IDD_ADAPTER_DIALOG    101
-#define IDC_ADAPTER_COMBO     1001
+#define IDD_ADAPTER_DIALOG      101
+#define IDC_ADAPTER_COMBO       1002
+#define ID_SELECT_ADAPTER       1007
+#define IDC_STATIC              -1
 #endif
 // Next default values for new objects
 //

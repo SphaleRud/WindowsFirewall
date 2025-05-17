@@ -48,7 +48,7 @@
     <ClInclude Include="types.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="PacketInterceptor.h">
+    <ClInclude Include="packetinterceptor.h">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
     <ClInclude Include="rule_manager.h">
@@ -60,19 +60,19 @@
     <ClInclude Include="main_window.h">
       <Filter>Header Files\GUI</Filter>
     </ClInclude>
+    <ClInclude Include="listview.h">
+      <Filter>Header Files\Utils</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="WindowsFirewall.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="packet_interceptor.cpp">
+    <ClCompile Include="packetinterceptor.cpp">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
     <ClCompile Include="main_window.cpp">
       <Filter>Source Files\GUI</Filter>
-    </ClCompile>
-    <ClCompile Include="logger.cpp">
-      <Filter>Source Files\Utils</Filter>
     </ClCompile>
     <ClCompile Include="rule_manager.cpp">
       <Filter>Source Files\Core</Filter>

@@ -1,10 +1,8 @@
-#define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <windows.h>
+п»ї#define WIN32_LEAN_AND_MEAN
+#include "main_window.h"
 #include <commctrl.h>
 #include <windowsx.h>
 #include <ctime>
-#include "main_window.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "ws2_32.lib")
@@ -12,6 +10,7 @@
 name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
 processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
+// ID РєРѕРјРїРѕРЅРµРЅС‚РѕРІ
 #define ID_RULES_LIST 1001
 #define ID_CONNECTIONS_LIST 1002
 #define ID_ADD_RULE 1003
@@ -19,502 +18,419 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define ID_START_CAPTURE 1005
 #define ID_STOP_CAPTURE 1006
 
-MainWindow::MainWindow() :
-    hwnd(NULL),
-    hInstance(NULL),
-    rulesListView(NULL),
-    connectionsListView(NULL),
-    packetInterceptor(nullptr) {
+std::string WStringToString(const std::wstring& wstr) {
+    if (wstr.empty()) return std::string();
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
+
+std::wstring StringToWString(const std::string& str) {
+    if (str.empty()) return std::wstring();
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
+    std::wstring wstrTo(size_needed, 0);
+    MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
+    return wstrTo;
+}
+
+MainWindow::MainWindow() : hwnd(nullptr), hInstance(nullptr), adapterInfoLabel(nullptr) {
 }
 
 MainWindow::~MainWindow() {
-    if (packetInterceptor) {
-        packetInterceptor->StopCapture();
+    if (packetInterceptor.IsCapturing()) {
+        packetInterceptor.StopCapture();
     }
 }
 
-MainWindow& MainWindow::Instance() {
-    static MainWindow instance;
-    return instance;
-}
+bool MainWindow::Initialize(HINSTANCE hInst) {
+    hInstance = hInst;
 
-void MainWindow::SetPacketInterceptor(std::shared_ptr<PacketInterceptor> interceptor) {
-    packetInterceptor = interceptor;
-}
-
-void MainWindow::OnPacketReceived(const PacketInfo& info) {
-    {
-        std::lock_guard<std::mutex> lock(packetMutex);
-        packetQueue.push(info);
-    }
-    PostMessage(hwnd, WM_UPDATE_PACKET, 0, 0);
-}
-
-void MainWindow::InitializeConnectionsList() {
-    LVCOLUMN lvc;
-    lvc.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
-    lvc.fmt = LVCFMT_LEFT;
-
-    wchar_t timeText[] = L"Time";
-    wchar_t sourceText[] = L"Source IP";
-    wchar_t destText[] = L"Destination IP";
-    wchar_t protoText[] = L"Protocol";
-    wchar_t descText[] = L"Description";
-
-    lvc.iSubItem = 0;
-    lvc.cx = 150;
-    lvc.pszText = timeText;
-    ListView_InsertColumn(connectionsListView, 0, &lvc);
-
-    lvc.iSubItem = 1;
-    lvc.cx = 120;
-    lvc.pszText = sourceText;
-    ListView_InsertColumn(connectionsListView, 1, &lvc);
-
-    lvc.iSubItem = 2;
-    lvc.cx = 120;
-    lvc.pszText = destText;
-    ListView_InsertColumn(connectionsListView, 2, &lvc);
-
-    lvc.iSubItem = 3;
-    lvc.cx = 80;
-    lvc.pszText = protoText;
-    ListView_InsertColumn(connectionsListView, 3, &lvc);
-
-    lvc.iSubItem = 4;
-    lvc.cx = 150;
-    lvc.pszText = descText;
-    ListView_InsertColumn(connectionsListView, 4, &lvc);
-}
-
-void MainWindow::AddPacketToList(const PacketInfo& info) {
-    if (!packetInterceptor) return;
-
-    LVITEM lvi = { 0 };
-    lvi.mask = LVIF_TEXT;
-    lvi.iItem = 0;
-
-    lvi.pszText = const_cast<LPWSTR>(info.time.c_str());
-    int index = ListView_InsertItem(connectionsListView, &lvi);
-
-    lvi.iSubItem = 1;
-    lvi.pszText = const_cast<LPWSTR>(info.sourceIP.c_str());
-    ListView_SetItem(connectionsListView, &lvi);
-
-    lvi.iSubItem = 2;
-    lvi.pszText = const_cast<LPWSTR>(info.destIP.c_str());
-    ListView_SetItem(connectionsListView, &lvi);
-
-    lvi.iSubItem = 3;
-    lvi.pszText = const_cast<LPWSTR>(info.protocol.c_str());
-    ListView_SetItem(connectionsListView, &lvi);
-
-    lvi.iSubItem = 4;
-    std::wstring desc = packetInterceptor->GetConnectionDescription(info);
-    lvi.pszText = const_cast<LPWSTR>(desc.c_str());
-    ListView_SetItem(connectionsListView, &lvi);
-
-    // Прокручиваем список к новому элементу
-    ListView_EnsureVisible(connectionsListView, index, FALSE);
-}
-
-
-bool MainWindow::Initialize(HINSTANCE hInstance, int nCmdShow) {
-    this->hInstance = hInstance;
-
-    // Регистрируем класс окна
-    WNDCLASSEX wc = { 0 };
-    wc.cbSize = sizeof(WNDCLASSEX);
-    wc.lpfnWndProc = MainWindow::WndProc;
-    wc.hInstance = hInstance;
-    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    wc.lpszClassName = L"FirewallWindowClass";
-
-    if (!RegisterClassEx(&wc)) {
+    if (!packetInterceptor.Initialize()) {
         return false;
     }
 
-    // Создаем главное окно
-    hwnd = CreateWindowEx(
+    UpdateAdapterInfo();
+    return CreateControls();
+}
+
+
+bool MainWindow::CreateMainWindow() {
+    WNDCLASSEXW wc = { sizeof(WNDCLASSEXW) };
+    wc.lpfnWndProc = MainWndProc;
+    wc.hInstance = hInstance;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"WindowsFirewallClass";
+
+    if (!RegisterClassExW(&wc)) {
+        return false;
+    }
+
+    hwnd = CreateWindowExW(
         0,
-        L"FirewallWindowClass",
+        L"WindowsFirewallClass",
         L"Windows Firewall",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT,
         800, 600,
-        NULL,
-        NULL,
+        nullptr,
+        nullptr,
         hInstance,
-        this  // Важно: передаем указатель на текущий объект
+        this
     );
 
     if (!hwnd) {
         return false;
     }
 
-    SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-
-    // Инициализируем элементы управления
-    InitCommonControls();
-    InitializeRulesList();
-    InitializeConnectionsList();
-
-    // Создаем список правил
-    rulesListView = CreateWindowEx(
-        0, WC_LISTVIEW, L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | WS_BORDER,
-        10, 40, 760, 200,
-        hwnd, (HMENU)ID_RULES_LIST,
-        hInstance, NULL
-    );
-
-    // Добавляем колонки в список правил
-    LVCOLUMN lvc = { 0 };
-    lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-
-    lvc.iSubItem = 0;
-    lvc.cx = 50;
-    lvc.pszText = (LPWSTR)L"ID";
-    ListView_InsertColumn(rulesListView, 0, &lvc);
-
-    lvc.iSubItem = 1;
-    lvc.cx = 100;
-    lvc.pszText = (LPWSTR)L"Protocol";
-    ListView_InsertColumn(rulesListView, 1, &lvc);
-
-    lvc.iSubItem = 2;
-    lvc.cx = 150;
-    lvc.pszText = (LPWSTR)L"Source IP";
-    ListView_InsertColumn(rulesListView, 2, &lvc);
-
-    lvc.iSubItem = 3;
-    lvc.cx = 150;
-    lvc.pszText = (LPWSTR)L"Destination IP";
-    ListView_InsertColumn(rulesListView, 3, &lvc);
-
-    lvc.iSubItem = 4;
-    lvc.cx = 100;
-    lvc.pszText = (LPWSTR)L"Action";
-    ListView_InsertColumn(rulesListView, 4, &lvc);
-
-    // Создаем список соединений
-    connectionsListView = CreateWindowEx(
-        0, WC_LISTVIEW, L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | WS_BORDER,
-        10, 280, 760, 200,
-        hwnd, (HMENU)ID_CONNECTIONS_LIST,
-        hInstance, NULL
-    );
-
-    // Добавляем колонки в список соединений
-    lvc.iSubItem = 0;
-    lvc.cx = 150;
-    lvc.pszText = (LPWSTR)L"Time";
-    ListView_InsertColumn(connectionsListView, 0, &lvc);
-
-    lvc.iSubItem = 1;
-    lvc.cx = 200;
-    lvc.pszText = (LPWSTR)L"Source";
-    ListView_InsertColumn(connectionsListView, 1, &lvc);
-
-    lvc.iSubItem = 2;
-    lvc.cx = 200;
-    lvc.pszText = (LPWSTR)L"Destination";
-    ListView_InsertColumn(connectionsListView, 2, &lvc);
-
-    lvc.iSubItem = 3;
-    lvc.cx = 100;
-    lvc.pszText = (LPWSTR)L"Protocol";
-    ListView_InsertColumn(connectionsListView, 3, &lvc);
-
-    lvc.iSubItem = 4;
-    lvc.cx = 100;
-    lvc.pszText = (LPWSTR)L"Action";
-    ListView_InsertColumn(connectionsListView, 4, &lvc);
-
-    // Создаем кнопки управления
-    CreateWindow(
-        L"BUTTON", L"Add Rule",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        10, 10, 80, 25,
-        hwnd, (HMENU)ID_ADD_RULE,
-        hInstance, NULL
-    );
-
-    CreateWindow(
-        L"BUTTON", L"Delete Rule",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        100, 10, 80, 25,
-        hwnd, (HMENU)ID_DELETE_RULE,
-        hInstance, NULL
-    );
-
-    CreateWindow(
-        L"BUTTON", L"Start Capture",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        190, 10, 90, 25,
-        hwnd, (HMENU)ID_START_CAPTURE,
-        hInstance, NULL
-    );
-
-    CreateWindow(
-        L"BUTTON", L"Stop Capture",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        290, 10, 90, 25,
-        hwnd, (HMENU)ID_STOP_CAPTURE,
-        hInstance, NULL
-    );
-
-    return true;
+    // РЎРѕР·РґР°РµРј РєРѕРЅС‚СЂРѕР»С‹
+    return CreateControls();
 }
 
-void MainWindow::Show() {
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
+LRESULT MainWindow::HandleCommand(WPARAM wParam, LPARAM lParam) {
+    switch (LOWORD(wParam)) {
+    case IDC_SELECT_ADAPTER:
+        OnSelectAdapter();
+        break;
+
+    case IDC_START_CAPTURE:
+        OnStartCapture();
+        break;
+    }
+    return 0;
 }
 
-LRESULT CALLBACK MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    MainWindow* window = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+LRESULT MainWindow::HandlePacketUpdate(WPARAM wParam, LPARAM lParam) {
+    HWND listView = GetDlgItem(hwnd, IDC_PACKET_LIST);
+    PacketInfo* packetInfo = reinterpret_cast<PacketInfo*>(lParam);
+    
+    if (packetInfo && listView) {
+        LVITEM lvi = { 0 };
+        lvi.mask = LVIF_TEXT;
+        lvi.iItem = ListView_GetItemCount(listView);
 
-    if (msg == WM_CREATE) {
-        CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lParam);
-        window = reinterpret_cast<MainWindow*>(createStruct->lpCreateParams);
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(window));
+        // Р’СЂРµРјСЏ
+        wchar_t timeStr[32];
+        _snwprintf_s(timeStr, _countof(timeStr), L"%02d:%02d:%02d.%03d",
+            packetInfo->systemTime.wHour,
+            packetInfo->systemTime.wMinute,
+            packetInfo->systemTime.wSecond,
+            packetInfo->systemTime.wMilliseconds);
+        
+        lvi.pszText = timeStr;
+        int pos = ListView_InsertItem(listView, &lvi);
+
+        // IP Рё РїРѕСЂС‚С‹
+        std::wstring sourceStr = StringToWString(
+            packetInfo->sourceIp + ":" + std::to_string(packetInfo->sourcePort));
+        ListView_SetItemText(listView, pos, 1, const_cast<LPWSTR>(sourceStr.c_str()));
+
+        std::wstring destStr = StringToWString(
+            packetInfo->destIp + ":" + std::to_string(packetInfo->destPort));
+        ListView_SetItemText(listView, pos, 2, const_cast<LPWSTR>(destStr.c_str()));
+
+        // РџСЂРѕС‚РѕРєРѕР»
+        std::wstring protoStr = StringToWString(packetInfo->protocol);
+        ListView_SetItemText(listView, pos, 3, const_cast<LPWSTR>(protoStr.c_str()));
+
+        // Р Р°Р·РјРµСЂ
+        wchar_t sizeStr[16];
+        _snwprintf_s(sizeStr, _countof(sizeStr), L"%zu", packetInfo->size);
+        ListView_SetItemText(listView, pos, 4, sizeStr);
+
+        delete packetInfo;
     }
-    else {
-        window = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
-    }
-    if (window) {
-        switch (msg) {
-        case WM_UPDATE_PACKET:
-        {
-            PacketInfo info;
-            bool hasPacket = false;
-            {
-                std::lock_guard<std::mutex> lock(window->packetMutex);
-                if (!window->packetQueue.empty()) {
-                    info = window->packetQueue.front();
-                    window->packetQueue.pop();
-                    hasPacket = true;
-                }
-            }
-            if (hasPacket) {
-                window->AddPacketToList(info);
-            }
-            return 0;
-        }
-        case WM_COMMAND:
-        {
-            if (!window) return 0;
-            switch (LOWORD(wParam)) {
-            case ID_ADD_RULE:
-                window->AddRule();
-                break;
-
-            case ID_DELETE_RULE:
-                window->DeleteRule();
-                break;
-
-            case ID_START_CAPTURE:
-                window->StartCapture();
-                break;
-
-            case ID_STOP_CAPTURE:
-                window->StopCapture();
-                break;
-            case ID_SELECT_ADAPTER:
-                window->ShowAdapterSelectionDialog();
-                break;
-            }
-            break;
-        }
-
-        case WM_DESTROY:
-            if (window) {
-                window->StopCapture();
-            }
-            PostQuitMessage(0);
-            return 0;
-        }
-    }
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    return 0;
 }
 
-void MainWindow::ShowAdapterSelectionDialog() {
-    if (!packetInterceptor) return;
+void MainWindow::ProcessPacket(const PacketInfo& info) {
+    // Р¤РѕСЂРјР°С‚РёСЂСѓРµРј РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ РїР°РєРµС‚Рµ РґР»СЏ РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ
+    std::wstring direction = std::wstring(info.direction.begin(), info.direction.end());
+    std::wstring sourceIp = std::wstring(info.sourceIp.begin(), info.sourceIp.end());
+    std::wstring destIp = std::wstring(info.destIp.begin(), info.destIp.end());
+    std::wstring protocol = std::wstring(info.protocol.begin(), info.protocol.end());
+    std::wstring processName = std::wstring(info.processName.begin(), info.processName.end());
 
-    auto adapters = packetInterceptor->GetNetworkAdapters();
-    if (adapters.empty()) {
-        MessageBox(hwnd, L"No network adapters found", L"Error", MB_OK | MB_ICONERROR);
+    // Р¤РѕСЂРјР°С‚РёСЂСѓРµРј СЃС‚СЂРѕРєСѓ РґР»СЏ РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ
+    std::wstring packetInfo = direction + L" | " +
+        sourceIp + L":" + std::to_wstring(info.sourcePort) + L" в†’ " +
+        destIp + L":" + std::to_wstring(info.destPort) + L" | " +
+        protocol + L" | " +
+        std::to_wstring(info.size) + L" bytes | " +
+        processName;
+
+    AddSystemMessage(packetInfo);
+}
+
+
+
+void MainWindow::UpdateAdapterInfo(const std::string& adapterInfo) {
+    if (!adapterInfoLabel) {
         return;
     }
 
-    // Создаем диалог
-    HWND hDlg = CreateDialog(hInstance, MAKEINTRESOURCE(IDD_ADAPTER_DIALOG), hwnd,
-        [](HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR {
-            MainWindow* window = reinterpret_cast<MainWindow*>(GetWindowLongPtr(GetParent(hDlg), GWLP_USERDATA));
-
-            switch (msg) {
-            case WM_INITDIALOG: {
-                HWND hCombo = GetDlgItem(hDlg, IDC_ADAPTER_COMBO);
-                auto adapters = window->packetInterceptor->GetNetworkAdapters();
-                for (const auto& adapter : adapters) {
-                    std::wstring displayText = adapter.name + L" (" +
-                        std::wstring(adapter.ipAddress.begin(), adapter.ipAddress.end()) + L")";
-                    SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)displayText.c_str());
-                }
-                return TRUE;
-            }
-
-            case WM_COMMAND:
-                if (LOWORD(wParam) == IDOK) {
-                    HWND hCombo = GetDlgItem(hDlg, IDC_ADAPTER_COMBO);
-                    int idx = SendMessage(hCombo, CB_GETCURSEL, 0, 0);
-                    if (idx != CB_ERR && window) {
-                        auto adapters = window->packetInterceptor->GetNetworkAdapters();
-                        window->selectedAdapterIp = adapters[idx].ipAddress;
-
-                        if (window->isCapturing) {
-                            window->StopCapture();
-                            window->StartCapture();
-                        }
-                    }
-                    EndDialog(hDlg, IDOK);
-                    return TRUE;
-                }
-                else if (LOWORD(wParam) == IDCANCEL) {
-                    EndDialog(hDlg, IDCANCEL);
-                    return TRUE;
-                }
-                break;
-            }
-            return FALSE;
-        });
-
-    ShowWindow(hDlg, SW_SHOW);
+    std::wstring wstr = StringToWString(adapterInfo);
+    std::wstring formattedText = L"Current adapter: " + wstr;
+    SetWindowText(adapterInfoLabel, formattedText.c_str());
 }
 
-void MainWindow::StartCapture() {
-    if (packetInterceptor) {
-        // Устанавливаем callback перед запуском
-        packetInterceptor->SetPacketCallback([this](const PacketInfo& info) {
-            OnPacketReceived(info);
-            });
-        if (packetInterceptor->StartCapture()) {
-            isCapturing = true;
-            // Отключаем кнопку Start и включаем Stop
-            EnableWindow(GetDlgItem(hwnd, ID_START_CAPTURE), FALSE);
-            EnableWindow(GetDlgItem(hwnd, ID_STOP_CAPTURE), TRUE);
+std::wstring MainWindow::GetAdapterDisplayName() const {
+    if (!packetInterceptor) {
+        return L"Initializing...";
+    }
 
-            // Добавляем сообщение в список соединений
-            LVITEM lvi = { 0 };
-            lvi.mask = LVIF_TEXT;
-            lvi.iItem = 0;
+    if (selectedAdapterIp.empty()) {
+        return L"Not selected";
+    }
 
-            // Получаем текущее время
-            time_t now = time(nullptr);
-            struct tm timeinfo;
-            localtime_s(&timeinfo, &now);
+    auto adapters = packetInterceptor->GetNetworkAdapters();
+    if (adapters.empty()) {
+        return L"No adapters available";
+    }
 
-            // Форматируем время
-            wchar_t timeStr[64];
-            swprintf_s(timeStr, L"%04d-%02d-%02d %02d:%02d:%02d",
-                timeinfo.tm_year + 1900,
-                timeinfo.tm_mon + 1,
-                timeinfo.tm_mday,
-                timeinfo.tm_hour,
-                timeinfo.tm_min,
-                timeinfo.tm_sec);
-
-            // Добавляем время
-            lvi.pszText = timeStr;
-            ListView_InsertItem(connectionsListView, &lvi);
-
-            // Добавляем остальные колонки
-            static const wchar_t* texts[] = {
-                L"System",
-                L"All",
-                L"---",
-                L"Capture Started"
-            };
-
-            for (int i = 1; i <= 4; i++) {
-                lvi.iSubItem = i;
-                lvi.pszText = const_cast<LPWSTR>(texts[i - 1]);
-                ListView_SetItem(connectionsListView, &lvi);
-            }
+    for (const auto& adapter : adapters) {
+        if (adapter.ipAddress == selectedAdapterIp) {
+            return adapter.name + L" (" +
+                std::wstring(adapter.ipAddress.begin(), adapter.ipAddress.end()) + L")";
         }
-        else {
-            MessageBox(hwnd, L"Failed to start packet capture", L"Error", MB_OK | MB_ICONERROR);
+    }
+
+    return L"Unknown Adapter";
+}
+
+void MainWindow::OnStartCapture() {
+    // Р‘С‹Р»Рѕ: if (!packetInterceptor->IsCapturing())
+    // РЎС‚Р°Р»Рѕ: РёСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ С‚РѕС‡РєРё РІРјРµСЃС‚Рѕ СЃС‚СЂРµР»РєРё
+    if (!packetInterceptor.IsCapturing()) {
+        if (packetInterceptor.StartCapture()) {  // С‚РѕР¶Рµ РёР·РјРµРЅРµРЅРѕ СЃ -> РЅР° .
+            HWND startButton = GetDlgItem(hwnd, IDC_START_CAPTURE);
+            SetWindowText(startButton, L"Stop Capture");
+        }
+    }
+    else {
+        if (packetInterceptor.StopCapture()) {   // С‚РѕР¶Рµ РёР·РјРµРЅРµРЅРѕ СЃ -> РЅР° .
+            HWND startButton = GetDlgItem(hwnd, IDC_START_CAPTURE);
+            SetWindowText(startButton, L"Start Capture");
         }
     }
 }
 
-void MainWindow::StopCapture() {
-    if (packetInterceptor) {
-        packetInterceptor->StopCapture();
+void MainWindow::OnSelectAdapter() {
+    ShowAdapterSelectionDialog();
+}
 
-        // Включаем кнопку Start и отключаем Stop
-        EnableWindow(GetDlgItem(hwnd, ID_START_CAPTURE), TRUE);
-        EnableWindow(GetDlgItem(hwnd, ID_STOP_CAPTURE), FALSE);
+INT_PTR CALLBACK MainWindow::AdapterDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    MainWindow* self = nullptr;
 
-        // Добавляем сообщение в список соединений
-        LVITEM lvi = { 0 };
-        lvi.mask = LVIF_TEXT;
-        lvi.iItem = 0;
+    if (uMsg == WM_INITDIALOG) {
+        SetWindowLongPtr(hwndDlg, GWLP_USERDATA, lParam);
+        self = reinterpret_cast<MainWindow*>(lParam);
+    }
+    else {
+        self = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hwndDlg, GWLP_USERDATA));
+    }
 
-        // Получаем текущее время
-        time_t now = time(nullptr);
-        struct tm timeinfo;
-        localtime_s(&timeinfo, &now);
+    if (!self) return FALSE;
 
-        // Форматируем время
-        wchar_t timeStr[64];
-        swprintf_s(timeStr, L"%04d-%02d-%02d %02d:%02d:%02d",
-            timeinfo.tm_year + 1900,
-            timeinfo.tm_mon + 1,
-            timeinfo.tm_mday,
-            timeinfo.tm_hour,
-            timeinfo.tm_min,
-            timeinfo.tm_sec);
+    switch (uMsg) {
+    case WM_INITDIALOG: {
+        HWND hCombo = GetDlgItem(hwndDlg, IDC_ADAPTER_COMBO);
+        std::vector<NetworkAdapter> adapters = self->packetInterceptor.GetNetworkAdapters();
 
-        // Добавляем время
-        lvi.pszText = timeStr;
-        ListView_InsertItem(connectionsListView, &lvi);
+        for (const auto& adapter : adapters) {
+            std::wstring wdesc = StringToWString(adapter.description);
+            std::wstring wname = StringToWString(adapter.name);
+            std::wstring adapterInfo = wdesc + L" (" + wname + L")";
 
-        // Добавляем остальные колонки
-        static const wchar_t* texts[] = {
-            L"System",
-            L"All",
-            L"---",
-            L"Capture Stopped"
-        };
+            int idx = (int)SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)adapterInfo.c_str());
+            NetworkAdapter* pAdapter = new NetworkAdapter(adapter);
+            SendMessage(hCombo, CB_SETITEMDATA, idx, (LPARAM)pAdapter);
+        }
+        return TRUE;
+    }
 
-        for (int i = 1; i <= 4; i++) {
-            lvi.iSubItem = i;
-            lvi.pszText = const_cast<LPWSTR>(texts[i - 1]);
-            ListView_SetItem(connectionsListView, &lvi);
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDOK: {
+            HWND hCombo = GetDlgItem(hwndDlg, IDC_ADAPTER_COMBO);
+            int idx = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+            if (idx != CB_ERR) {
+                NetworkAdapter* pAdapter = (NetworkAdapter*)SendMessage(hCombo, CB_GETITEMDATA, idx, 0);
+                if (pAdapter) {
+                    self->packetInterceptor.SetCurrentAdapter(pAdapter->name);
+                    self->UpdateAdapterInfo(pAdapter->description);
+                    delete pAdapter;
+                }
+            }
+            EndDialog(hwndDlg, IDOK);
+            return TRUE;
+        }
+
+        case IDCANCEL:
+            EndDialog(hwndDlg, IDCANCEL);
+            return TRUE;
+        }
+        break;
+
+    case WM_DESTROY: {
+        HWND hCombo = GetDlgItem(hwndDlg, IDC_ADAPTER_COMBO);
+        int count = (int)SendMessage(hCombo, CB_GETCOUNT, 0, 0);
+        for (int i = 0; i < count; i++) {
+            NetworkAdapter* pAdapter = (NetworkAdapter*)SendMessage(hCombo, CB_GETITEMDATA, i, 0);
+            delete pAdapter;
+        }
+        return TRUE;
+    }
+    }
+    return FALSE;
+}
+
+bool MainWindow::AutoSelectAdapter() {
+    if (!packetInterceptor) return false;
+
+    auto adapters = packetInterceptor->GetNetworkAdapters();
+    if (adapters.empty()) {
+        AddSystemMessage(L"No network adapters found");
+        return false;
+    }
+
+    // РџСЂРµРґРїРѕС‡РёС‚Р°РµРј Wi-Fi Р°РґР°РїС‚РµСЂ
+    for (const auto& adapter : adapters) {
+        if (adapter.isWifi) {
+            selectedAdapterIp = adapter.ipAddress;
+            UpdateAdapterInfo();
+            AddSystemMessage(L"Selected WiFi adapter: " + GetAdapterDisplayName());
+            return true;
         }
     }
+
+    // Р•СЃР»Рё Wi-Fi РЅРµ РЅР°Р№РґРµРЅ, Р±РµСЂРµРј РїРµСЂРІС‹Р№ РґРѕСЃС‚СѓРїРЅС‹Р№
+    selectedAdapterIp = adapters[0].ipAddress;
+    UpdateAdapterInfo();
+    AddSystemMessage(L"Selected adapter: " + GetAdapterDisplayName());
+    return true;
 }
-void MainWindow::InitializeRulesList() {
-    // Создаем список правил
-    rulesListView = CreateWindowEx(
-        0, WC_LISTVIEW, L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | WS_BORDER,
-        10, 40, 760, 200,
-        hwnd, (HMENU)ID_RULES_LIST,
-        hInstance, NULL
+
+
+bool MainWindow::CreateControls() {
+    // РџРѕР»СѓС‡Р°РµРј СЂР°Р·РјРµСЂС‹ РєР»РёРµРЅС‚СЃРєРѕР№ РѕР±Р»Р°СЃС‚Рё РѕРєРЅР°
+    RECT clientRect;
+    GetClientRect(hwnd, &clientRect);
+    int windowWidth = clientRect.right - clientRect.left;
+
+    // РЎРѕР·РґР°РµРј С€СЂРёС„С‚ РґР»СЏ СЌР»РµРјРµРЅС‚РѕРІ СѓРїСЂР°РІР»РµРЅРёСЏ
+    HFONT hFont = CreateFont(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+    const int MARGIN = 10;
+    const int BUTTON_HEIGHT = 30;
+    const int BUTTON_WIDTH = 120;
+    const int LABEL_HEIGHT = 40;
+
+    // РЎРѕР·РґР°РµРј РјРµС‚РєСѓ РґР»СЏ РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ С‚РµРєСѓС‰РµРіРѕ Р°РґР°РїС‚РµСЂР°
+    adapterInfoLabel = CreateWindowEx(
+        0, L"STATIC", L"Current adapter: None",
+        WS_CHILD | WS_VISIBLE | SS_LEFT,
+        MARGIN, MARGIN,
+        windowWidth - 2 * MARGIN, LABEL_HEIGHT,
+        hwnd, (HMENU)IDC_ADAPTER_LABEL,
+        hInstance, nullptr
     );
+    SendMessage(adapterInfoLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-    // Добавляем колонки в список правил
+    // РЎРѕР·РґР°РµРј РєРЅРѕРїРєРё
+    int buttonY = MARGIN + LABEL_HEIGHT + MARGIN;
+
+    HWND selectAdapterButton = CreateWindowEx(
+        0, L"BUTTON", L"Select Adapter",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        MARGIN, buttonY,
+        BUTTON_WIDTH, BUTTON_HEIGHT,
+        hwnd, (HMENU)IDC_SELECT_ADAPTER,
+        hInstance, nullptr
+    );
+    SendMessage(selectAdapterButton, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+    HWND startButton = CreateWindowEx(
+        0, L"BUTTON", L"Start Capture",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        MARGIN + BUTTON_WIDTH + MARGIN, buttonY,
+        BUTTON_WIDTH, BUTTON_HEIGHT,
+        hwnd, (HMENU)IDC_START_CAPTURE,
+        hInstance, nullptr
+    );
+    SendMessage(startButton, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+    // РЎРѕР·РґР°РµРј ListView
+    int listY = buttonY + BUTTON_HEIGHT + MARGIN;
+    int listHeight = clientRect.bottom - listY - MARGIN;
+
+    HWND listView = CreateWindowEx(
+        0, WC_LISTVIEW, L"",
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | WS_BORDER | LVS_SHOWSELALWAYS,
+        MARGIN, listY,
+        windowWidth - 2 * MARGIN, listHeight,
+        hwnd, (HMENU)IDC_PACKET_LIST,
+        hInstance, nullptr
+    );
+    SendMessage(listView, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+    // РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј СЂР°СЃС€РёСЂРµРЅРЅС‹Рµ СЃС‚РёР»Рё ListView
+    ListView_SetExtendedListViewStyle(listView,
+        LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+
+    // Р”РѕР±Р°РІР»СЏРµРј РєРѕР»РѕРЅРєРё
     LVCOLUMN lvc = { 0 };
     lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
 
     const struct {
-        const wchar_t* text;
+        LPCWSTR text;
+        int width;
+    } columns[] = {
+        { L"Time", 150 },
+        { L"Source", 120 },
+        { L"Destination", 120 },
+        { L"Protocol", 80 },
+        { L"Length", 80 }
+    };
+
+    for (int i = 0; i < ARRAYSIZE(columns); i++) {
+        lvc.iSubItem = i;
+        lvc.pszText = (LPWSTR)columns[i].text;
+        lvc.cx = columns[i].width;
+        ListView_InsertColumn(listView, i, &lvc);
+    }
+
+    return true;
+}
+
+
+
+
+void MainWindow::ShowAdapterSelectionDialog() {
+    DialogBoxParam(
+        hInstance,
+        MAKEINTRESOURCE(IDD_ADAPTER_DIALOG),
+        hwnd,
+        AdapterDialogProc,
+        reinterpret_cast<LPARAM>(this)
+    );
+}
+
+// РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ СЃРїРёСЃРєРѕРІ
+void MainWindow::InitializeRulesList() {
+    rulesListView = CreateWindowEx(
+        0, WC_LISTVIEW, L"",
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | WS_BORDER,
+        10, 40, 760, 200,
+        hwnd, (HMENU)ID_RULES_LIST,
+        hInstance, NULL
+    );
+
+    const struct {
+        LPCWSTR text;
         int width;
     } columns[] = {
         {L"ID", 50},
@@ -524,6 +440,9 @@ void MainWindow::InitializeRulesList() {
         {L"Action", 100}
     };
 
+    LVCOLUMN lvc = { 0 };
+    lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+
     for (int i = 0; i < _countof(columns); i++) {
         lvc.iSubItem = i;
         lvc.cx = columns[i].width;
@@ -532,15 +451,211 @@ void MainWindow::InitializeRulesList() {
     }
 }
 
+void MainWindow::InitializeConnectionsList() {
+    connectionsListView = CreateWindowEx(
+        0, WC_LISTVIEW, L"",
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | WS_BORDER,
+        10, 280, 760, 200,
+        hwnd, (HMENU)ID_CONNECTIONS_LIST,
+        hInstance, NULL
+    );
+
+    const struct {
+        LPCWSTR text;
+        int width;
+    } columns[] = {
+        {L"Time", 150},
+        {L"Source IP", 120},
+        {L"Destination IP", 120},
+        {L"Protocol", 80},
+        {L"Description", 150}
+    };
+
+    LVCOLUMN lvc = { 0 };
+    lvc.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
+    lvc.fmt = LVCFMT_LEFT;
+
+    for (int i = 0; i < _countof(columns); i++) {
+        lvc.iSubItem = i;
+        lvc.cx = columns[i].width;
+        lvc.pszText = const_cast<LPWSTR>(columns[i].text);
+        ListView_InsertColumn(connectionsListView, i, &lvc);
+    }
+}
+
+// РћР±СЂР°Р±РѕС‚РєР° РїР°РєРµС‚РѕРІ
+void MainWindow::OnPacketReceived(const PacketInfo& info) {
+    {
+        std::lock_guard<std::mutex> lock(packetMutex);
+        packetQueue.push(info);
+    }
+    PostMessage(hwnd, WM_UPDATE_PACKET, 0, 0);
+}
+
+void MainWindow::AddPacketToList(const PacketInfo& packet) {
+    std::wstring direction = std::wstring(packet.direction.begin(), packet.direction.end());
+    std::wstring sourceIp = std::wstring(packet.sourceIp.begin(), packet.sourceIp.end());
+    std::wstring destIp = std::wstring(packet.destIp.begin(), packet.destIp.end());
+    std::wstring protocol = std::wstring(packet.protocol.begin(), packet.protocol.end());
+    std::wstring process = std::wstring(packet.processName.begin(), packet.processName.end());
+
+    WCHAR timeStr[64];
+    tm tmTime;
+    localtime_s(&tmTime, &packet.timestamp);
+    swprintf_s(timeStr, L"%02d:%02d:%02d",
+        tmTime.tm_hour, tmTime.tm_min, tmTime.tm_sec);
+
+    std::vector<std::wstring> items = {
+        timeStr,
+        direction,
+        sourceIp + L":" + std::to_wstring(packet.sourcePort),
+        destIp + L":" + std::to_wstring(packet.destPort),
+        protocol,
+        std::to_wstring(packet.size),
+        process
+    };
+
+    connectionsListView.AddItem(items);
+}
+
+// РЈРїСЂР°РІР»РµРЅРёРµ Р·Р°С…РІР°С‚РѕРј
+void MainWindow::StartCapture() {
+    if (!packetInterceptor || selectedAdapterIp.empty()) {
+        MessageBox(hwnd, L"Please select a network adapter first", L"Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    OutputDebugString((L"Starting capture on adapter: " +
+        std::wstring(selectedAdapterIp.begin(), selectedAdapterIp.end()) + L"\n").c_str());
+
+    // РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј Р°РґР°РїС‚РµСЂ Рё Р·Р°РїСѓСЃРєР°РµРј Р·Р°С…РІР°С‚
+    packetInterceptor->SetCurrentAdapter(selectedAdapterIp);
+    if (packetInterceptor->StartCapture()) {
+        isCapturing = true;
+        EnableWindow(GetDlgItem(hwnd, ID_START_CAPTURE), FALSE);
+        EnableWindow(GetDlgItem(hwnd, ID_STOP_CAPTURE), TRUE);
+
+        std::wstring message = L"Started capturing on " + GetAdapterDisplayName();
+        AddSystemMessage(message);
+        OutputDebugString((L"Started capture: " +
+            std::wstring(selectedAdapterIp.begin(), selectedAdapterIp.end()) + L"\n").c_str());
+    }
+    else {
+        MessageBox(hwnd, L"Failed to start capture", L"Error", MB_OK | MB_ICONERROR);
+        OutputDebugString((L"Failed to start capture on adapter: " +
+            std::wstring(selectedAdapterIp.begin(), selectedAdapterIp.end()) + L"\n").c_str());
+    }
+}
+
+void MainWindow::StopCapture() {
+    if (!packetInterceptor) return;
+
+    packetInterceptor->StopCapture();
+    isCapturing = false;
+    EnableWindow(GetDlgItem(hwnd, ID_START_CAPTURE), TRUE);
+    EnableWindow(GetDlgItem(hwnd, ID_STOP_CAPTURE), FALSE);
+
+    AddSystemMessage(L"Stopped capturing");
+    OutputDebugString(L"Stopped capture\n");
+}
+
+// Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅС‹Рµ РјРµС‚РѕРґС‹
+// Р”РѕР±Р°РІР»СЏРµРј СЂРµР°Р»РёР·Р°С†РёСЋ AddSystemMessage
+void MainWindow::AddSystemMessage(const std::wstring& message) {
+    if (!connectionsListView) return;
+
+    LVITEM lvi = { 0 };
+    lvi.mask = LVIF_TEXT;
+    lvi.iItem = 0;
+    lvi.iSubItem = 0;
+
+    // РџРѕР»СѓС‡Р°РµРј С‚РµРєСѓС‰РµРµ РІСЂРµРјСЏ
+    time_t now = time(nullptr);
+    struct tm timeinfo;
+    localtime_s(&timeinfo, &now);
+    wchar_t timeStr[64];
+    swprintf_s(timeStr, L"%04d-%02d-%02d %02d:%02d:%02d",
+        timeinfo.tm_year + 1900,
+        timeinfo.tm_mon + 1,
+        timeinfo.tm_mday,
+        timeinfo.tm_hour,
+        timeinfo.tm_min,
+        timeinfo.tm_sec);
+
+    // Р¤РѕСЂРјРёСЂСѓРµРј СЃРѕРѕР±С‰РµРЅРёРµ СЃ РІСЂРµРјРµРЅРЅРѕР№ РјРµС‚РєРѕР№
+    std::wstring fullMessage = std::wstring(timeStr) + L" - " + message;
+    lvi.pszText = const_cast<LPWSTR>(fullMessage.c_str());
+
+    ListView_InsertItem(connectionsListView, &lvi);
+}
+
+
+LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    MainWindow* window = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+
+    switch (msg) {
+    case WM_CREATE: {
+        CREATESTRUCT* cs = reinterpret_cast<CREATESTRUCT*>(lParam);
+        window = reinterpret_cast<MainWindow*>(cs->lpCreateParams);
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(window));
+        return 0;
+    }
+
+    case WM_COMMAND:
+        if (window) {
+            window->HandleCommand(LOWORD(wParam));
+        }
+        return 0;
+
+    case WM_UPDATE_PACKET:
+        if (window) {
+            window->HandlePacketUpdate();
+        }
+        return 0;
+
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+
+
+// РџСѓР±Р»РёС‡РЅС‹Рµ РјРµС‚РѕРґС‹
+void MainWindow::Show(int nCmdShow) {
+    ShowWindow(hwnd, nCmdShow);
+    UpdateWindow(hwnd);
+
+    if (packetInterceptor->Initialize()) {
+        auto adapters = packetInterceptor->GetNetworkAdapters();
+
+        if (!adapters.empty()) {
+            if (selectedAdapterIp.empty()) {
+                AutoSelectAdapter();
+            }
+            UpdateAdapterInfo();
+        }
+    }
+}
+
+
+void MainWindow::UpdateRulesList() {
+    // TODO: РћР±РЅРѕРІРёС‚СЊ СЃРїРёСЃРѕРє РїСЂР°РІРёР»
+}
+
+void MainWindow::UpdateConnectionsList() {
+    // TODO: РћР±РЅРѕРІРёС‚СЊ СЃРїРёСЃРѕРє СЃРѕРµРґРёРЅРµРЅРёР№
+}
 
 void MainWindow::AddRule() {
-    // TODO: Добавить диалоговое окно для создания правила
+    // TODO: Р”РѕР±Р°РІРёС‚СЊ СЂРµР°Р»РёР·Р°С†РёСЋ
     MessageBox(hwnd, L"Add Rule functionality will be implemented soon",
         L"Not Implemented", MB_OK | MB_ICONINFORMATION);
 }
 
 void MainWindow::DeleteRule() {
-    // Получаем выбранный элемент
     int selectedIndex = ListView_GetNextItem(rulesListView, -1, LVNI_SELECTED);
     if (selectedIndex == -1) {
         MessageBox(hwnd, L"Please select a rule to delete",
@@ -548,19 +663,8 @@ void MainWindow::DeleteRule() {
         return;
     }
 
-    // Запрашиваем подтверждение
     if (MessageBox(hwnd, L"Are you sure you want to delete this rule?",
         L"Confirm Delete", MB_YESNO | MB_ICONQUESTION) == IDYES) {
         ListView_DeleteItem(rulesListView, selectedIndex);
     }
-}
-
-// Добавляем реализации методов UpdateRulesList и UpdateConnectionsList, 
-// хотя они пока не используются
-void MainWindow::UpdateRulesList() {
-    // TODO: Обновить список правил
-}
-
-void MainWindow::UpdateConnectionsList() {
-    // TODO: Обновить список соединений
 }

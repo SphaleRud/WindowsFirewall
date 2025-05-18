@@ -509,6 +509,12 @@ bool MainWindow::CreateControls() {
             (LPARAM)StringToWString(adapter.description).c_str());
     }
 
+    // Инициализируем список соединений
+    int listY = buttonY + BUTTON_HEIGHT + MARGIN;
+    if (!InitializeConnectionsList(listY)) {
+        return false;
+    }
+/*
     // ListView для пакетов
     int listY = buttonY + BUTTON_HEIGHT + MARGIN;
     if (!connectionsListView.Initialize(hwnd, MARGIN, listY,
@@ -523,7 +529,7 @@ bool MainWindow::CreateControls() {
     connectionsListView.AddColumn(L"Назначение", 180, 2);  
     connectionsListView.AddColumn(L"Протокол", 80, 3);     
     connectionsListView.AddColumn(L"Процесс", 150, 4);     
-
+*/
     return true;
 }
 
@@ -564,41 +570,40 @@ bool MainWindow::InitializeRulesList() {
     return true;
 }
 
-void MainWindow::InitializeConnectionsList() {
-    // Создаем список подключений
-    connectionsListView = CreateWindowEx(
-        0, WC_LISTVIEW, L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | WS_BORDER,
-        10, 280, 760, 200,
-        hwnd, (HMENU)ID_CONNECTIONS_LIST,
-        hInstance, NULL
-    );
-
-    if (!connectionsListView) {
-        MessageBox(hwnd, L"Failed to create connections list view", L"Error", MB_OK | MB_ICONERROR);
-        return;
+bool MainWindow::InitializeConnectionsList(int yPosition) {
+    // Инициализируем ListView
+    if (!connectionsListView.Initialize(hwnd, MARGIN, yPosition,
+        WINDOW_WIDTH - 2 * MARGIN, WINDOW_HEIGHT - yPosition - MARGIN,
+        (HMENU)IDC_PACKET_LIST, hInstance)) {
+        return false;
     }
 
-    // Добавляем столбцы используя метод AddColumn класса ListView
-    const struct Column {
-        std::wstring text;
+    // Проверим количество и порядок колонок, добавив отладочный вывод
+    OutputDebugString(L"Initializing columns...\n");
+
+    const struct ColumnInfo {
+        const wchar_t* text;
         int width;
     } columns[] = {
-        {L"Time", 150},
-        {L"Source", 200},
-        {L"Destination", 200},
-        {L"Protocol", 100},
-        {L"Direction", 100}
+        {L"Направление", 80},     // 0
+        {L"IP источника", 140},   // 1
+        {L"Порт источника", 80},  // 2
+        {L"IP назначения", 140},  // 3
+        {L"Порт назначения", 80}, // 4
+        {L"Протокол", 80},        // 5
+        {L"Процесс", 150}         // 6
     };
 
-    // Добавляем столбцы
     for (int i = 0; i < _countof(columns); i++) {
-        connectionsListView.AddColumn(i, columns[i].text, columns[i].width);
+        if (!connectionsListView.AddColumn(columns[i].text, columns[i].width, i)) {
+            wchar_t debug[256];
+            swprintf_s(debug, L"Failed to add column %d: %s\n", i, columns[i].text);
+            OutputDebugString(debug);
+            return false;
+        }
     }
 
-    // Устанавливаем расширенный стиль
-    ListView_SetExtendedListViewStyle(connectionsListView,
-        LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+    return true;
 }
 
 // Обработка пакетов
@@ -664,42 +669,39 @@ void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
 }
 
 void MainWindow::AddPacketToList(const PacketInfo& info) {
-    if (!connectionsListView) return;
+    if (!connectionsListView) {
+        OutputDebugString(L"ListView is not initialized!\n");
+        return;
+    }
 
-    // Создаем вектор строк для добавления
     std::vector<std::wstring> items;
+    items.reserve(7); // Резервируем место для 7 элементов
 
-    // Время
-    items.push_back(std::wstring(info.time.begin(), info.time.end()));
+    // Добавляем элементы в правильном порядке
+    items.push_back(info.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий");  // 0
+    items.push_back(StringToWString(info.sourceIp));                                            // 1
+    items.push_back(std::to_wstring(info.sourcePort));                                         // 2
+    items.push_back(StringToWString(info.destIp));                                             // 3
+    items.push_back(std::to_wstring(info.destPort));                                           // 4
+    items.push_back(StringToWString(info.protocol));                                           // 5
+    items.push_back(StringToWString(info.processName));                                        // 6
 
-    // Source с портом
-    std::string sourceWithPort = info.sourceIp;
-    if (info.sourcePort != 0) {
-        sourceWithPort += ":" + std::to_string(info.sourcePort);
-    }
-    items.push_back(std::wstring(sourceWithPort.begin(), sourceWithPort.end()));
+    // Отладочный вывод
+    wchar_t debug[512];
+    swprintf_s(debug, L"Adding packet: Dir=%s, SrcIP=%s, SrcPort=%d, DstIP=%s, DstPort=%d, Proto=%s, Proc=%s\n",
+        items[0].c_str(), items[1].c_str(), info.sourcePort,
+        items[3].c_str(), info.destPort, items[5].c_str(), items[6].c_str());
+    OutputDebugString(debug);
 
-    // Destination с портом
-    std::string destWithPort = info.destIp;
-    if (info.destPort != 0) {
-        destWithPort += ":" + std::to_string(info.destPort);
-    }
-    items.push_back(std::wstring(destWithPort.begin(), destWithPort.end()));
-
-    // Протокол
-    items.push_back(std::wstring(info.protocol.begin(), info.protocol.end()));
-
-    // Направление
-    items.push_back(info.direction == PacketDirection::Incoming ? L"Incoming" : L"Outgoing");
-
-    // Добавляем все элементы одним вызовом
     int index = connectionsListView.AddItem(items);
-
-    // Прокручиваем к новой записи
-    if (index >= 0) {
-        ListView_EnsureVisible(connectionsListView.GetHandle(), index, FALSE);
+    if (index < 0) {
+        OutputDebugString(L"Failed to add item to ListView!\n");
+        return;
     }
+
+    ListView_EnsureVisible(connectionsListView.GetHandle(), index, FALSE);
 }
+
 // Управление захватом
 void MainWindow::StartCapture() {
     // Проверяем только наличие выбранного адаптера

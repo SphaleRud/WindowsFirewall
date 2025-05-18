@@ -69,7 +69,7 @@ private:
     static std::string WStringToString(const std::wstring& wstr);
 
     bool InitializeRulesList();
-    void InitializeConnectionsList();
+    bool InitializeConnectionsList(int yPosition);
     void DeleteRule();
 
     bool CreateMainWindow();

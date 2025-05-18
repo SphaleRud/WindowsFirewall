@@ -1,5 +1,4 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
-
 #include <winsock2.h> 
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -8,18 +7,19 @@
 #include "rule_manager.h"
 #include "logger.h"
 
+#pragma comment(linker,"\"/manifestdependency:type='win32' \
+name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
+processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #pragma comment(lib, "ws2_32.lib")
 
+// Проверка прав администратора
 bool IsRunAsAdmin() {
     BOOL fIsRunAsAdmin = FALSE;
     DWORD dwError = ERROR_SUCCESS;
     PSID pAdministratorsGroup = NULL;
 
-    // Allocate and initialize a SID of the administrators group.
     SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
-    if (!AllocateAndInitializeSid(
-        &NtAuthority,
-        2,
+    if (!AllocateAndInitializeSid(&NtAuthority, 2,
         SECURITY_BUILTIN_DOMAIN_RID,
         DOMAIN_ALIAS_RID_ADMINS,
         0, 0, 0, 0, 0, 0,
@@ -28,8 +28,6 @@ bool IsRunAsAdmin() {
         goto Cleanup;
     }
 
-    // Determine whether the SID of administrators group is enabled in 
-    // the primary access token of the process.
     if (!CheckTokenMembership(NULL, pAdministratorsGroup, &fIsRunAsAdmin)) {
         dwError = GetLastError();
         goto Cleanup;
@@ -43,47 +41,33 @@ Cleanup:
     return fIsRunAsAdmin;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-    LPSTR lpCmdLine, int nCmdShow) {
-    if (!IsRunAsAdmin()) {
-        MessageBox(NULL, L"This application must be run as administrator",
-            L"Administrator Rights Required", MB_OK | MB_ICONERROR);
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    try {
+        INITCOMMONCONTROLSEX icc;
+        icc.dwSize = sizeof(INITCOMMONCONTROLSEX);
+        icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_WIN95_CLASSES;
+        InitCommonControlsEx(&icc);
+
+        MainWindow mainWindow;
+        if (!mainWindow.Initialize(hInstance)) {
+            MessageBox(NULL, L"Failed to initialize window", L"Error", MB_OK | MB_ICONERROR);
+            return 1;
+        }
+
+        mainWindow.Show(nCmdShow);
+
+        MSG msg;
+        while (GetMessage(&msg, NULL, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+
+        return static_cast<int>(msg.wParam);
+    }
+    catch (const std::exception& e) {
+        std::string error = "Unhandled exception: " + std::string(e.what());
+        OutputDebugStringA(error.c_str());
+        MessageBoxA(NULL, error.c_str(), "Error", MB_OK | MB_ICONERROR);
         return 1;
     }
-
-    // Создаем директорию для логов, если её нет
-    CreateDirectory(L"logs", NULL);
-
-    // Инициализируем логгер
-    Logger::Instance().Initialize("logs/firewall.log");
-
-    // Инициализируем перехватчик пакетов
-    auto interceptor = std::make_shared<PacketInterceptor>();
-    if (!interceptor->Initialize()) {
-        MessageBox(NULL, L"Failed to initialize Packet Interceptor.\nMake sure you run as Administrator.",
-            L"Error", MB_OK | MB_ICONERROR);
-        return 1;
-    }
-
-    // Инициализируем главное окно
-    if (!MainWindow::Instance().Initialize(hInstance, nCmdShow)) {
-        MessageBox(NULL, L"Failed to initialize Main Window",
-            L"Error", MB_OK | MB_ICONERROR);
-        return 1;
-    }
-
-    // Устанавливаем перехватчик пакетов
-    MainWindow::Instance().SetPacketInterceptor(interceptor);
-
-    // Показываем главное окно и запускаем цикл сообщений
-    MainWindow::Instance().Show();
-
-    // Основной цикл сообщений
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-
-    return (int)msg.wParam;
 }

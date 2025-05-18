@@ -14,10 +14,23 @@
 #define IDC_WINDOWSFIREWALL			109
 #define IDC_MYICON				2
 #ifndef IDC_STATIC
-#define IDC_STATIC				-1
-#define ID_SELECT_ADAPTER     40001
-#define IDD_ADAPTER_DIALOG    101
-#define IDC_ADAPTER_COMBO     1001
+#define IDD_ADAPTER_DIALOG      101
+#define IDC_ADAPTER_COMBO       1006
+//#define ID_SELECT_ADAPTER       1007
+// Идентификаторы элементов главного окна
+#define IDC_ADAPTER_LABEL           1001
+#define IDC_SELECT_ADAPTER         1002
+#define IDC_START_CAPTURE          1003
+#define IDC_STOP_CAPTURE          1004
+#define IDC_PACKET_LIST           1005
+
+// Идентификаторы для диалога выбора адаптера
+#define IDD_SELECT_ADAPTER        2000
+#define IDC_ADAPTER_LIST         2001
+
+// Идентификатор пользовательского сообщения
+#define WM_UPDATE_PACKET         (WM_USER + 1)
+#define IDC_STATIC              -1
 #endif
 // Next default values for new objects
 //

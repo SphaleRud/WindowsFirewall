@@ -11,7 +11,11 @@
 #include <iphlpapi.h>
 #include "packetinterceptor.h"
 #include "logger.h"
+#include <psapi.h> 
+#include <shlwapi.h>
 
+#pragma comment(lib, "Shlwapi.lib")
+#pragma comment(lib, "Psapi.lib")
 #pragma comment(lib, "wpcap.lib")
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "iphlpapi.lib")
@@ -79,6 +83,55 @@ PacketDirection PacketInterceptor::DeterminePacketDirection(const std::string& s
         return PacketDirection::Outgoing;
     }
     return PacketDirection::Incoming;
+}
+
+bool GetProcessInfoByPortAndProto(uint16_t port, const std::string& proto, uint32_t& pid, std::string& pname) {
+    pid = 0;
+    pname = "Unknown";
+
+    if (proto == "TCP") {
+        DWORD size = 0;
+        GetExtendedTcpTable(nullptr, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+        std::vector<char> buffer(size);
+        auto* table = reinterpret_cast<PMIB_TCPTABLE_OWNER_PID>(buffer.data());
+        if (GetExtendedTcpTable(table, &size, TRUE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
+            for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+                if (ntohs(table->table[i].dwLocalPort) == port) {
+                    pid = table->table[i].dwOwningPid;
+                    break;
+                }
+            }
+        }
+    }
+    else if (proto == "UDP") {
+        DWORD size = 0;
+        GetExtendedUdpTable(nullptr, &size, TRUE, AF_INET, UDP_TABLE_OWNER_PID, 0);
+        std::vector<char> buffer(size);
+        auto* table = reinterpret_cast<PMIB_UDPTABLE_OWNER_PID>(buffer.data());
+        if (GetExtendedUdpTable(table, &size, TRUE, AF_INET, UDP_TABLE_OWNER_PID, 0) == NO_ERROR) {
+            for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+                if (ntohs(table->table[i].dwLocalPort) == port) {
+                    pid = table->table[i].dwOwningPid;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (pid != 0) {
+        HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+        if (hProc) {
+            wchar_t wname[MAX_PATH] = L"";
+            if (GetModuleFileNameExW(hProc, NULL, wname, MAX_PATH)) {
+                LPCWSTR baseName = PathFindFileNameW(wname);
+                char mbname[MAX_PATH] = "";
+                WideCharToMultiByte(CP_UTF8, 0, baseName, -1, mbname, MAX_PATH, NULL, NULL);
+                pname = std::string(mbname);
+            }
+            CloseHandle(hProc);
+        }
+    }
+    return pid != 0;
 }
 
 std::string PacketInterceptor::GetConnectionDescription(const PacketInfo& info) const {
@@ -630,6 +683,14 @@ void PacketInterceptor::ProcessPacket(const pcap_pkthdr* header, const u_char* p
             info.sourcePort = 0;
             info.destPort = 0;
         }
+
+        // После определения портов и направления
+        info.processId = 0;
+        info.processName = "Unknown";
+
+        const std::string proto = info.protocol;
+        uint16_t localPort = (info.direction == PacketDirection::Outgoing) ? info.sourcePort : info.destPort;
+        GetProcessInfoByPortAndProto(localPort, proto, info.processId, info.processName);
 
         info.direction = DeterminePacketDirection(srcIP); // Используем srcIP вместо sourceIP
 

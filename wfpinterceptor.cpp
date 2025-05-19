@@ -45,8 +45,6 @@ bool WfpInterceptor::StartCapture() {
 
     // Подписка на ALE connect/accept events (TCP/UDP)
     FWPM_NET_EVENT_SUBSCRIPTION0 sub = {};
-    sub.enumTemplate.netEventEnumType = FWPM_NET_EVENT_KEYWORD_ALE_AUTH_CONNECT
-        | FWPM_NET_EVENT_KEYWORD_ALE_AUTH_RECV_ACCEPT;
     sub.flags = 0;
 
     DWORD result = FwpmNetEventSubscribe0(
@@ -122,20 +120,24 @@ void NTAPI WfpInterceptor::NetEventCallback(const FWPM_NET_EVENT2* netEvent, voi
     default: info.protocol = "OTHER"; break;
     }
 
-    // PID и имя процесса
-    info.processId = netEvent->header.processId;
-    info.processName = "Unknown";
-
-    // Направление (ALE_AUTH_CONNECT - исходящее, ALE_AUTH_RECV_ACCEPT - входящее)
-    if (netEvent->type == FWPM_NET_EVENT_TYPE_CLASSIFY_DROP ||
-        netEvent->type == FWPM_NET_EVENT_TYPE_CLASSIFY_ALLOW) {
-        // Для событий классификации:
-        // ALE_AUTH_CONNECT → Outgoing, ALE_AUTH_RECV_ACCEPT → Incoming.
-        if (netEvent->header.layerId == FWPM_LAYER_ALE_AUTH_CONNECT_V4) {
-            info.direction = PacketDirection::Outgoing;
+    if (netEvent->type == FWPM_NET_EVENT_TYPE_CLASSIFY_ALLOW) {
+        auto* allow = netEvent->header.classifyAllow;
+        if (allow) {
+            if (allow->layerId == FWPM_LAYER_ALE_AUTH_CONNECT_V4)
+                info.direction = PacketDirection::Outgoing;
+            else if (allow->layerId == FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4)
+                info.direction = PacketDirection::Incoming;
+            info.processId = allow->processId;
         }
-        else {
-            info.direction = PacketDirection::Incoming;
+    }
+    else if (netEvent->type == FWPM_NET_EVENT_TYPE_CLASSIFY_DROP) {
+        auto* drop = netEvent->header.classifyDrop;
+        if (drop) {
+            if (drop->layerId == FWPM_LAYER_ALE_AUTH_CONNECT_V4)
+                info.direction = PacketDirection::Outgoing;
+            else if (drop->layerId == FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4)
+                info.direction = PacketDirection::Incoming;
+            info.processId = drop->processId;
         }
     }
 

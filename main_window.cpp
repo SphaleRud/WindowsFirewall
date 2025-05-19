@@ -1,21 +1,19 @@
-﻿#define _WIN32_WINNT 0x0600
-#include "main_window.h"
+﻿#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <iphlpapi.h>
 #include <commctrl.h>
 #include <windowsx.h>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
-#include <iphlpapi.h>
-#include <ws2tcpip.h>
 #include <algorithm>
+#include "main_window.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
 
-#ifndef GAA_FLAG_INCLUDE_PREFIX
-#define GAA_FLAG_INCLUDE_PREFIX 0x00000010
-#endif
 
 std::vector<AdapterInfo> GetAllAdapters() {
     std::vector<AdapterInfo> adapters;
@@ -35,7 +33,8 @@ std::vector<AdapterInfo> GetAllAdapters() {
         if (pCurr->OperStatus == IfOperStatusUp) {
             AdapterInfo info;
             info.name = pCurr->AdapterName;
-            info.description = pCurr->Description ? pCurr->Description : "";
+            std::wstring ws = pCurr->Description ? pCurr->Description : L"";
+            info.description = std::string(ws.begin(), ws.end());
             info.isActive = true;
             // IP
             for (IP_ADAPTER_UNICAST_ADDRESS* ua = pCurr->FirstUnicastAddress; ua; ua = ua->Next) {

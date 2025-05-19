@@ -1,10 +1,12 @@
 #pragma once
+
 #include <windows.h>
 #include <fwpmu.h>
 #include <string>
 #include <vector>
 #include <functional>
 #include <mutex>
+#include <thread>
 #include "types.h"
 
 class WfpInterceptor {

@@ -9,6 +9,7 @@
 #include <sstream>
 #include <algorithm>
 #include "main_window.h"
+#include "wfpinterceptor.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "iphlpapi.lib")
@@ -61,6 +62,7 @@ bool IsWifiAdapter(const std::string& description) {
         lowerName.find("802.11") != std::string::npos;
 }
 
+
 std::string TimeTToString(const time_t& time) {
     std::ostringstream oss;
     tm tmTime;
@@ -78,9 +80,7 @@ std::string MainWindow::WStringToString(const std::wstring& wstr) {
 }
 
 std::wstring MainWindow::StringToWString(const std::string& str) {
-    if (str.empty()) {
-        return std::wstring();
-    }
+    if (str.empty()) return std::wstring();
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
     std::wstring wstr(size_needed, 0);
     MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstr[0], size_needed);
@@ -95,6 +95,7 @@ MainWindow::~MainWindow() {
         packetInterceptor.StopCapture();
     }
 }
+
 
 bool MainWindow::Initialize(HINSTANCE hInstance_) {
     hInstance = hInstance_;
@@ -137,22 +138,23 @@ bool MainWindow::Initialize(HINSTANCE hInstance_) {
         return false;
     }
 
-    std::vector<AdapterInfo> adapters = GetAllAdapters();
-    if (!adapters.empty()) {
-        selectedAdapterIp = adapters[0].address;
-        UpdateAdapterInfo();
-    }
+    // Новый адаптер: выбираем WiFi или первый активный с адресом != 127.0.0.1
+    AutoSelectAdapter();
 
-    if (!adapters.empty()) {
-        HWND comboBox = GetDlgItem(hwnd, IDC_ADAPTER_COMBO);
-        SendMessage(comboBox, CB_SETCURSEL, 0, 0);
-        selectedAdapterIp = adapters[0].address;
-        UpdateAdapterInfo();
-        EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
+    HWND comboBox = GetDlgItem(hwnd, IDC_ADAPTER_COMBO);
+    auto adapters = GetAllAdapters();
+    int index = 0;
+    for (const auto& adapter : adapters) {
+        if (adapter.address == selectedAdapterIp) {
+            SendMessage(comboBox, CB_SETCURSEL, index, 0);
+            break;
+        }
+        ++index;
     }
+    UpdateAdapterInfo();
+    EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
 
     PostMessage(hwnd, WM_APP + 1, 0, 0); // пользовательское сообщение для инициализации
-
     return true;
 }
 
@@ -348,7 +350,8 @@ void MainWindow::OnStartCapture() {
     }
     OutputDebugStringA("OnStartCapture: SetPacketCallback called!\n");
     packetInterceptor.SetPacketCallback([this](const PacketInfo& packet) {
-        OutputDebugStringA("Packet callback called!\n");
+        OutputDebugStringA(("PacketCallback: " + packet.sourceIp + " -> " + packet.destIp + "\n").c_str());
+        // Не фильтруй по adapterIp! WFP ALE ловит всё
         PacketInfo* packetCopy = new PacketInfo(packet);
         PostMessage(hwnd, WM_APP + 2, 0, (LPARAM)packetCopy);
         });
@@ -461,14 +464,25 @@ bool MainWindow::AutoSelectAdapter() {
         AddSystemMessage(L"No network adapters found");
         return false;
     }
+    // Предпочитаем WiFi
     for (const auto& adapter : adapters) {
-        if (IsWifiAdapter(adapter.description)) {
+        if (IsWifiAdapter(adapter.description) && adapter.isActive && adapter.address != "127.0.0.1") {
             selectedAdapterIp = adapter.address;
             UpdateAdapterInfo();
             AddSystemMessage(L"Selected WiFi adapter: " + GetAdapterDisplayName());
             return true;
         }
     }
+    // Если нет WiFi, берём первый активный не-loopback
+    for (const auto& adapter : adapters) {
+        if (adapter.isActive && adapter.address != "127.0.0.1") {
+            selectedAdapterIp = adapter.address;
+            UpdateAdapterInfo();
+            AddSystemMessage(L"Selected adapter: " + GetAdapterDisplayName());
+            return true;
+        }
+    }
+    // Если ничего не нашли, берём первый попавшийся
     selectedAdapterIp = adapters[0].address;
     UpdateAdapterInfo();
     AddSystemMessage(L"Selected adapter: " + GetAdapterDisplayName());
@@ -640,6 +654,7 @@ void MainWindow::UpdateGroupedPackets() {
 
 void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
     try {
+        OutputDebugStringA(("OnPacketCaptured: " + packet.sourceIp + " -> " + packet.destIp + "\n").c_str());
         GroupedPacketInfo groupInfo;
         groupInfo.sourceIp = packet.sourceIp;
         groupInfo.destIp = packet.destIp;
@@ -657,7 +672,7 @@ void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
                 adapterPackets[selectedAdapterIp] = groupedPackets;
             }
         }
-        OutputDebugStringA(("Captured packet with key: " + key + "\n").c_str());
+        UpdateGroupedPackets();
     }
     catch (const std::exception& e) {
         OutputDebugStringA(("OnPacketCaptured error: " + std::string(e.what()) + "\n").c_str());
@@ -665,6 +680,7 @@ void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
 }
 
 void MainWindow::AddPacketToList(const PacketInfo& info) {
+    OutputDebugStringA(("AddPacketToList: " + info.sourceIp + " -> " + info.destIp + "\n").c_str());
     if (!connectionsListView) {
         OutputDebugString(L"ListView is not initialized!\n");
         return;

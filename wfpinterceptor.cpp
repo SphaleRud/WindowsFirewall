@@ -2,8 +2,10 @@
 #include <fwpmu.h>
 #include <ws2tcpip.h>
 #include <iostream>
+#include <ctime>
 
 #pragma comment(lib, "fwpuclnt.lib")
+#pragma comment(lib, "ws2_32.lib")
 
 WfpInterceptor::WfpInterceptor()
     : engineHandle(nullptr), netEventSub(nullptr), isCapturing(false), stopEvent(nullptr) {
@@ -43,7 +45,6 @@ bool WfpInterceptor::StartCapture() {
     if (!engineHandle || isCapturing) return false;
     stopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
 
-    // Подписка на ALE connect/accept events (TCP/UDP)
     FWPM_NET_EVENT_SUBSCRIPTION0 sub = {};
     sub.flags = 0;
 
@@ -90,12 +91,30 @@ void WfpInterceptor::EventThreadProc(WfpInterceptor* interceptor) {
     }
 }
 
-// WFP вызывает этот callback в отдельном потоке!
+// Только *_0 структуры, processId нет, direction по layerId
 void NTAPI WfpInterceptor::NetEventCallback(const FWPM_NET_EVENT2* netEvent, void* context) {
-    if (!netEvent || !context) return;
+    OutputDebugStringA("!!! NetEventCallback called\n");
+    if (!netEvent) return;
+
+    char buf[256];
+    sprintf(buf, "type=%u\n", netEvent->type);
+    OutputDebugStringA(buf);
+
+    // Обрабатываем только ALE события
+    if (netEvent->type != FWPM_NET_EVENT_TYPE_CLASSIFY_ALLOW && netEvent->type != FWPM_NET_EVENT_TYPE_CLASSIFY_DROP) {
+        OutputDebugStringA("Not ALE event, skipping\n");
+        return;
+    }
+
+    // Здесь уже можно безопасно работать с netEvent->header
+    sprintf(buf, "ipVersion=%u, proto=%u\n", netEvent->header.ipVersion, netEvent->header.ipProtocol);
+    OutputDebugStringA(buf);
+
+ //   if (!netEvent || !context) return;
     WfpInterceptor* self = reinterpret_cast<WfpInterceptor*>(context);
 
-    if (netEvent->header.ipVersion != FWP_IP_VERSION_V4) return;
+ //   if (netEvent->header.ipVersion != FWP_IP_VERSION_V4)
+ //       return;
 
     PacketInfo info;
 
@@ -120,24 +139,39 @@ void NTAPI WfpInterceptor::NetEventCallback(const FWPM_NET_EVENT2* netEvent, voi
     default: info.protocol = "OTHER"; break;
     }
 
+    info.direction = PacketDirection::Incoming;
+    info.processId = 0; // processId не поддерживается в *_0
+
+    constexpr UINT16 ALE_AUTH_CONNECT_V4_ID = 44;
+    constexpr UINT16 ALE_AUTH_RECV_ACCEPT_V4_ID = 46;
+
+    if (netEvent->type == FWPM_NET_EVENT_TYPE_CLASSIFY_ALLOW && netEvent->classifyAllow) {
+        sprintf(buf, "classifyAllow layerId=%u\n", netEvent->classifyAllow->layerId);
+        OutputDebugStringA(buf);
+    }
+    if (netEvent->type == FWPM_NET_EVENT_TYPE_CLASSIFY_DROP && netEvent->classifyDrop) {
+        sprintf(buf, "classifyDrop layerId=%u\n", netEvent->classifyDrop->layerId);
+        OutputDebugStringA(buf);
+    }
+
+    // ALE события: разрешённые
     if (netEvent->type == FWPM_NET_EVENT_TYPE_CLASSIFY_ALLOW) {
-        auto* allow = netEvent->header.classifyAllow;
+        const FWPM_NET_EVENT_CLASSIFY_ALLOW0* allow = netEvent->classifyAllow;
         if (allow) {
-            if (allow->layerId == FWPM_LAYER_ALE_AUTH_CONNECT_V4)
+            if (allow->layerId == ALE_AUTH_CONNECT_V4_ID)
                 info.direction = PacketDirection::Outgoing;
-            else if (allow->layerId == FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4)
+            else if (allow->layerId == ALE_AUTH_RECV_ACCEPT_V4_ID)
                 info.direction = PacketDirection::Incoming;
-            info.processId = allow->processId;
         }
     }
+    // ALE события: заблокированные
     else if (netEvent->type == FWPM_NET_EVENT_TYPE_CLASSIFY_DROP) {
-        auto* drop = netEvent->header.classifyDrop;
+        const FWPM_NET_EVENT_CLASSIFY_DROP2* drop = netEvent->classifyDrop;
         if (drop) {
-            if (drop->layerId == FWPM_LAYER_ALE_AUTH_CONNECT_V4)
+            if (drop->layerId == ALE_AUTH_CONNECT_V4_ID)
                 info.direction = PacketDirection::Outgoing;
-            else if (drop->layerId == FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4)
+            else if (drop->layerId == ALE_AUTH_RECV_ACCEPT_V4_ID)
                 info.direction = PacketDirection::Incoming;
-            info.processId = drop->processId;
         }
     }
 
@@ -147,10 +181,14 @@ void NTAPI WfpInterceptor::NetEventCallback(const FWPM_NET_EVENT2* netEvent, voi
     strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", localtime(&now));
     info.time = buffer;
 
-    info.size = 0; // WFP не сообщает размер
+
+    sprintf(buf, "WFP Packet: src=%s dst=%s proto=%s dir=%d\n",
+        info.sourceIp.c_str(), info.destIp.c_str(), info.protocol.c_str(), (int)info.direction);
+    OutputDebugStringA(buf);
 
     // Передаём в основной callback (UI)
     std::lock_guard<std::mutex> lock(self->callbackMutex);
     if (self->packetCallback)
+        OutputDebugStringA("!!! WFP: packetCallback will be called\n");
         self->packetCallback(info);
 }

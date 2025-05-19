@@ -3,15 +3,13 @@
 #include <memory>
 #include <queue>
 #include <mutex>
+#include "packetinterceptor.h"
+#include "listview.h"
+#include "resource.h"
 #include <map>
 #include <unordered_map>
 #include <string>
 #include <fstream>
-#include <vector>
-#include "wfpinterceptor.h"
-#include "listview.h"
-#include "types.h"
-#include "resource.h"
 
 #define WM_UPDATE_PACKET (WM_USER + 1)
 
@@ -39,6 +37,7 @@ protected:
     void OnSelectAdapter();
     bool CreateControls();
     void ShowAdapterSelectionDialog();
+    static bool IsWifiAdapter(const std::string& description);
     LRESULT HandleCommand(WPARAM wParam, LPARAM lParam);
     LRESULT HandlePacketUpdate(WPARAM wParam, LPARAM lParam);
 
@@ -54,6 +53,7 @@ private:
 
     std::mutex groupedPacketsMutex;
     std::map<std::string, GroupedPacketInfo> groupedPackets;
+    // Новый: map для каждого адаптера
     std::unordered_map<std::string, std::map<std::string, GroupedPacketInfo>> adapterPackets;
 
     static const size_t UPDATE_INTERVAL = 1000;
@@ -90,7 +90,7 @@ private:
     void UpdateRulesList();
     void UpdateConnectionsList();
 
-    // Сохранить/загрузить/очистить пакеты адаптера
+    // Сохранение/загрузка/очистка списков
     void SaveAdapterPackets(const std::string& adapter);
     void LoadAdapterPackets(const std::string& adapter);
     void ClearSavedAdapterPackets(const std::string& adapter);
@@ -100,7 +100,7 @@ private:
     HINSTANCE hInstance;
     ListView rulesListView;
     ListView connectionsListView;
-    WfpInterceptor packetInterceptor;
+    PacketInterceptor packetInterceptor;
     std::string selectedAdapterIp;
     bool isCapturing;
     std::queue<PacketInfo> packetQueue;
@@ -117,7 +117,3 @@ namespace WindowConstants {
     constexpr int DEFAULT_COMBO_HEIGHT = 200;
     constexpr int DEFAULT_COMBO_WIDTH = 250;
 }
-
-// Получить список всех активных IPv4-адаптеров
-std::vector<AdapterInfo> GetAllAdapters();
-bool IsWifiAdapter(const std::string& description);

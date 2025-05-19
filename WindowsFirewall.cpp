@@ -1,7 +1,16 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#include <winsock2.h> 
+#include <ws2tcpip.h>
 #include <windows.h>
 #include "main_window.h"
+#include "packetinterceptor.h"
 #include "rule_manager.h"
 #include "logger.h"
+
+#pragma comment(linker,"\"/manifestdependency:type='win32' \
+name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
+processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#pragma comment(lib, "ws2_32.lib")
 
 // Проверка прав администратора
 bool IsRunAsAdmin() {

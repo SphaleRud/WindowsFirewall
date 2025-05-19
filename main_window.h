@@ -101,18 +101,23 @@ private:
     void StopCapture();
 
     // Константы для меню
-    static const int CMD_PACKET_PROPERTIES = 2510;
-    static const int CMD_COPY_SOURCE_IP = 2511;
-    static const int CMD_COPY_DEST_IP = 2512;
-    static const int CMD_BLOCK_IP = 2513;
-    static const int CMD_WHOIS_IP = 2514;
+    static const int CMD_PACKET_PROPERTIES = 3101;
+    static const int CMD_COPY_SOURCE_IP = 3102;
+    static const int CMD_COPY_DEST_IP = 3103;
+    static const int CMD_BLOCK_IP = 3104;
+    static const int CMD_WHOIS_IP = 3105;
 
     // Вспомогательные методы
     std::string GetPacketKeyFromListView(int index);
     std::shared_ptr<GroupedPacketInfo> GetPacketInfo(const std::string& key);
-    void CopyTextToClipboard(const std::string& text);
+    void CopyToClipboard(const std::string& text);
     void AddBlockingRule(const std::string& ip);
     void ShowPacketProperties(int itemIndex);
+
+    void OpenRulesDialog();
+    void OpenSettingsDialog();
+
+    static std::string GetProcessPath(DWORD processId);
 
     // Обработчики
     void OnContextMenu(HWND hwnd, int x, int y);

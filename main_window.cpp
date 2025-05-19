@@ -8,7 +8,13 @@
 #include <sstream>
 #include <mutex>
 #include <shellapi.h>
+#include <chrono>
+#include <psapi.h>
+#include <wbemidl.h>
+#include <comdef.h>
 
+#pragma comment(lib, "wbemuuid.lib")
+#pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "ws2_32.lib")
@@ -32,6 +38,29 @@ std::string TimeTToString(const time_t& time) {
     localtime_s(&tmTime, &time);
     oss << std::put_time(&tmTime, "%Y-%m-%d %H:%M:%S");
     return oss.str();
+}
+
+std::string GetCurrentUTCTime() {
+    auto now = std::chrono::system_clock::now();
+    auto now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_utc;
+    gmtime_s(&tm_utc, &now_c);
+
+    std::ostringstream oss;
+    oss << std::put_time(&tm_utc, "%Y-%m-%d %H:%M:%S");
+    return oss.str();
+}
+
+std::string GetLocalSystemTime() {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+
+    char buffer[64];
+    sprintf_s(buffer, sizeof(buffer), "%04d-%02d-%02d %02d:%02d:%02d",
+        st.wYear, st.wMonth, st.wDay,
+        st.wHour, st.wMinute, st.wSecond);
+
+    return std::string(buffer);
 }
 
 std::string MainWindow::WStringToString(const std::wstring& wstr) {
@@ -73,6 +102,130 @@ struct GroupedPacketView {
     std::deque<std::string> order; // ключи (groupKey) в порядке добавления
     std::map<std::string, GroupedPacketInfo> groups;
 };
+
+// Добавим функцию получения пути процесса
+std::string MainWindow::GetProcessPath(DWORD processId) {
+    if (processId == 0) return "";
+
+    // Открываем процесс с расширенными правами
+    HANDLE hProcess = OpenProcess(
+        PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+        FALSE,
+        processId);
+
+    if (!hProcess) {
+        // Пробуем открыть с ограниченными правами
+        hProcess = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION,
+            FALSE,
+            processId);
+    }
+
+    if (hProcess) {
+        WCHAR path[MAX_PATH] = { 0 };
+        DWORD size = MAX_PATH;
+
+        // Пробуем разные способы получить путь
+        if (QueryFullProcessImageName(hProcess, 0, path, &size)) {
+            CloseHandle(hProcess);
+            return WStringToString(path);
+        }
+        else {
+            // Альтернативный метод
+            HMODULE hMod;
+            DWORD cbNeeded;
+            if (EnumProcessModules(hProcess, &hMod, sizeof(hMod), &cbNeeded)) {
+                if (GetModuleFileNameEx(hProcess, hMod, path, MAX_PATH)) {
+                    CloseHandle(hProcess);
+                    return WStringToString(path);
+                }
+            }
+        }
+        CloseHandle(hProcess);
+    }
+
+    // Если не удалось получить путь стандартными методами,
+    // пробуем через WMI
+    try {
+        HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+        if (SUCCEEDED(hr)) {
+            IWbemLocator* pLoc = NULL;
+            hr = CoCreateInstance(
+                CLSID_WbemLocator,
+                0,
+                CLSCTX_INPROC_SERVER,
+                IID_IWbemLocator,
+                (LPVOID*)&pLoc);
+
+            if (SUCCEEDED(hr)) {
+                IWbemServices* pSvc = NULL;
+                hr = pLoc->ConnectServer(
+                    _bstr_t(L"ROOT\\CIMV2"),
+                    NULL, NULL, NULL,
+                    0, NULL, NULL,
+                    &pSvc);
+
+                if (SUCCEEDED(hr)) {
+                    hr = CoSetProxyBlanket(
+                        pSvc,
+                        RPC_C_AUTHN_WINNT,
+                        RPC_C_AUTHZ_NONE,
+                        NULL,
+                        RPC_C_AUTHN_LEVEL_CALL,
+                        RPC_C_IMP_LEVEL_IMPERSONATE,
+                        NULL,
+                        EOAC_NONE);
+
+                    if (SUCCEEDED(hr)) {
+                        std::wstring query = L"SELECT ExecutablePath FROM Win32_Process WHERE ProcessId = " +
+                            std::to_wstring(processId);
+                        IEnumWbemClassObject* pEnumerator = NULL;
+                        hr = pSvc->ExecQuery(
+                            bstr_t("WQL"),
+                            bstr_t(query.c_str()),
+                            WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+                            NULL,
+                            &pEnumerator);
+
+                        if (SUCCEEDED(hr)) {
+                            IWbemClassObject* pclsObj = NULL;
+                            ULONG uReturn = 0;
+
+                            while (pEnumerator) {
+                                hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
+                                if (uReturn == 0) break;
+
+                                VARIANT vtProp;
+                                hr = pclsObj->Get(L"ExecutablePath", 0, &vtProp, 0, 0);
+                                if (SUCCEEDED(hr) && vtProp.vt == VT_BSTR) {
+                                    std::wstring path = vtProp.bstrVal;
+                                    VariantClear(&vtProp);
+                                    pclsObj->Release();
+                                    pEnumerator->Release();
+                                    pSvc->Release();
+                                    pLoc->Release();
+                                    CoUninitialize();
+                                    return WStringToString(path);
+                                }
+                                VariantClear(&vtProp);
+                                pclsObj->Release();
+                            }
+                            pEnumerator->Release();
+                        }
+                    }
+                    pSvc->Release();
+                }
+                pLoc->Release();
+            }
+            CoUninitialize();
+        }
+    }
+    catch (...) {
+        // Игнорируем ошибки WMI
+    }
+
+    return "";
+}
 
 GroupedPacketView groupedPacketView;
 
@@ -163,26 +316,23 @@ bool MainWindow::Initialize(HINSTANCE hInstance) {
 
 // Статическая функция форматирования размера файла
 std::wstring MainWindow::FormatFileSize(size_t bytes) {
-    try {
-        if (bytes < 1024) {
-            return std::to_wstring(bytes) + L" байт";
-        }
-        else if (bytes < 1024 * 1024) {
-            double kb = static_cast<double>(bytes) / 1024.0;
-            wchar_t buffer[64] = {};
-            swprintf_s(buffer, L"%.2f КБ", kb);
-            return buffer;
-        }
-        else {
-            double mb = static_cast<double>(bytes) / (1024.0 * 1024.0);
-            wchar_t buffer[64] = {};
-            swprintf_s(buffer, L"%.2f МБ", mb);
-            return buffer;
-        }
+    const wchar_t* sizes[] = { L"Б", L"КБ", L"МБ", L"ГБ" };
+    int order = 0;
+    double size = static_cast<double>(bytes);
+
+    while (size >= 1024 && order < 3) {
+        order++;
+        size = size / 1024;
     }
-    catch (...) {
-        return L"??? байт";
+
+    wchar_t buffer[64];
+    if (order == 0) {
+        swprintf_s(buffer, L"%d %s", static_cast<int>(size), sizes[order]);
     }
+    else {
+        swprintf_s(buffer, L"%.2f %s", size, sizes[order]);
+    }
+    return buffer;
 }
 
 
@@ -295,12 +445,14 @@ void MainWindow::SaveAdapterPackets(const std::string& adapter) {
     }
     for (const auto& pair : groupedPackets) {
         const auto& pkt = pair.second;
-        fout << pkt.sourceIp << ','
+        fout << pkt.time << ','  // Добавляем время первым полем
+            << pkt.sourceIp << ','
             << pkt.destIp << ','
             << pkt.protocol << ','
             << pkt.processName << ','
+            << pkt.totalSize << ','
+            << pkt.packetCount << ','
             << pkt.processId << ','
-            << pkt.time << ','
             << pkt.sourcePort << ','
             << pkt.destPort << ','
             << (pkt.direction == PacketDirection::Incoming ? "in" : "out") << '\n';
@@ -318,22 +470,32 @@ void MainWindow::LoadAdapterPackets(const std::string& adapter) {
     while (std::getline(fin, line)) {
         std::stringstream ss(line);
         GroupedPacketInfo pkt;
-        std::string dir;
+
+        std::getline(ss, pkt.time, ',');
         std::getline(ss, pkt.sourceIp, ',');
         std::getline(ss, pkt.destIp, ',');
         std::getline(ss, pkt.protocol, ',');
         std::getline(ss, pkt.processName, ',');
-        std::string pidstr;
-        std::getline(ss, pidstr, ',');
-        pkt.processId = static_cast<uint32_t>(std::stoul(pidstr));
-        std::getline(ss, pkt.time, ',');
-        std::string sp, dp;
-        std::getline(ss, sp, ',');
-        pkt.sourcePort = static_cast<uint16_t>(std::stoi(sp));
-        std::getline(ss, dp, ',');
-        pkt.destPort = static_cast<uint16_t>(std::stoi(dp));
-        std::getline(ss, dir, ',');
-        pkt.direction = (dir == "in") ? PacketDirection::Incoming : PacketDirection::Outgoing;
+
+        std::string temp;
+        std::getline(ss, temp, ',');
+        pkt.processId = static_cast<uint32_t>(std::stoul(temp));
+
+        std::getline(ss, temp, ',');
+        pkt.sourcePort = static_cast<uint16_t>(std::stoi(temp));
+
+        std::getline(ss, temp, ',');
+        pkt.destPort = static_cast<uint16_t>(std::stoi(temp));
+
+        std::getline(ss, temp, ',');
+        pkt.totalSize = std::stoull(temp);
+
+        std::getline(ss, temp, ',');
+        pkt.packetCount = std::stoul(temp);
+
+        std::getline(ss, temp, ',');
+        pkt.direction = (temp == "in") ? PacketDirection::Incoming : PacketDirection::Outgoing;
+
         loaded[pkt.GetKey()] = pkt;
     }
     fin.close();
@@ -671,53 +833,80 @@ bool MainWindow::CreateControls() {
     // Кнопки управления
     int buttonY = MARGIN * 2 + LABEL_HEIGHT;
 
-    // Кнопка Start Capture
-    CreateWindowEx(
-        0, WC_BUTTON, L"Start Capture",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        MARGIN, buttonY,
-        BUTTON_WIDTH, BUTTON_HEIGHT,
-        hwnd, (HMENU)IDC_START_CAPTURE,
-        hInstance, NULL
-    );
+    int x = 10;
+    int y = 20;
+    const int ICON_BTN_SIZE = 28;
+    const int ICON_BTN_SPACING = 2;
 
-    // Кнопка Stop Capture
-    CreateWindowEx(
-        0, WC_BUTTON, L"Stop Capture",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED,
-        MARGIN + BUTTON_WIDTH + MARGIN, buttonY,
-        BUTTON_WIDTH, BUTTON_HEIGHT,
-        hwnd, (HMENU)IDC_STOP_CAPTURE,
-        hInstance, NULL
-    );
+    // Новый размер
+    const int COMPACT_BUTTON_WIDTH = 80;
+    const int COMPACT_BUTTON_HEIGHT = 22;
+    const int COMPACT_MARGIN = 4;
 
-    // Кнопка Сохранить список
-    CreateWindowEx(
-        0, WC_BUTTON, L"Save List",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        MARGIN + 2 * (BUTTON_WIDTH + MARGIN), buttonY,
-        BUTTON_WIDTH, BUTTON_HEIGHT,
-        hwnd, (HMENU)ID_SAVE_PACKETS,
-        hInstance, NULL
-    );
-    // Кнопка Очистить сохранённое
-    CreateWindowEx(
-        0, WC_BUTTON, L"Clear Saved",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        MARGIN + 3 * (BUTTON_WIDTH + MARGIN), buttonY,
-        BUTTON_WIDTH, BUTTON_HEIGHT,
-        hwnd, (HMENU)ID_CLEAR_SAVED_PACKETS,
-        hInstance, NULL
-    );
+    HICON hIconPlay = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_PLAY));
+    HICON hIconStop = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_STOP));
+    HICON hIconSettings = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_SETTINGS));
 
-    // Комбо-бокс размещаем справа от всех кнопок с большим отступом
+    // Считаем позицию каждой кнопки компактно:
+    int buttonX = MARGIN;
+    HWND hBtnPlay = CreateWindowEx(0, WC_BUTTON, L"",
+        WS_CHILD | WS_VISIBLE | BS_ICON,
+        x, y, 28, 28,
+        hwnd, (HMENU)IDC_START_CAPTURE, hInstance, NULL);
+
+    x += ICON_BTN_SIZE + ICON_BTN_SPACING;
+
+    HWND hBtnStop = CreateWindowEx(0, WC_BUTTON, L"",
+        WS_CHILD | WS_VISIBLE | BS_ICON,
+        x + 32, y, 28, 28,
+        hwnd, (HMENU)IDC_STOP_CAPTURE, hInstance, NULL);
+
+    x += ICON_BTN_SIZE + ICON_BTN_SPACING;
+
+    HWND hBtnSettings = CreateWindowEx(0, WC_BUTTON, L"",
+        WS_CHILD | WS_VISIBLE | BS_ICON,
+        x + 64, y, 28, 28,
+        hwnd, (HMENU)IDC_OPEN_SETTINGS, hInstance, NULL);
+
+
+
+    SendMessage(hBtnPlay, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconPlay);
+    SendMessage(hBtnStop, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconStop);
+    SendMessage(hBtnSettings, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconSettings);
+
+    HWND hToolTip = CreateWindowEx(0, TOOLTIPS_CLASS, NULL,
+        WS_POPUP | TTS_ALWAYSTIP,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        hwnd, NULL, hInstance, NULL);
+
+    TOOLINFO ti = { 0 };
+    ti.cbSize = sizeof(TOOLINFO);
+    ti.uFlags = TTF_SUBCLASS;
+    ti.hwnd = hwnd;
+
+    // Для Play
+    ti.uId = (UINT_PTR)hBtnPlay;
+    ti.lpszText = (LPWSTR)L"Начать захват";
+    SendMessage(hToolTip, TTM_ADDTOOL, 0, (LPARAM)&ti);
+
+    // Для Stop
+    ti.uId = (UINT_PTR)hBtnStop;
+    ti.lpszText = (LPWSTR)L"Остановить захват";
+    SendMessage(hToolTip, TTM_ADDTOOL, 0, (LPARAM)&ti);
+
+    // Для Settings
+    ti.uId = (UINT_PTR)hBtnSettings;
+    ti.lpszText = (LPWSTR)L"Настройки";
+    SendMessage(hToolTip, TTM_ADDTOOL, 0, (LPARAM)&ti);
+    //add_btn(L"Настройки", IDC_OPEN_SETTINGS);
+
+    // ComboBox размещаем справа
     HWND adapterCombo = CreateWindowEx(
         0, WC_COMBOBOX, L"",
         WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-        MARGIN + 4 * (BUTTON_WIDTH + MARGIN) + MARGIN, buttonY, // <-- сдвиг вправо
-        COMBO_WIDTH, COMBO_HEIGHT,
-        hwnd, (HMENU)IDC_ADAPTER_COMBO,
-        hInstance, NULL
+        buttonX + COMPACT_MARGIN, buttonY, COMBO_WIDTH, COMBO_HEIGHT,
+        hwnd, (HMENU)IDC_ADAPTER_COMBO, hInstance, NULL
     );
 
     // Заполняем комбо-бокс адаптерами
@@ -879,16 +1068,24 @@ bool MainWindow::OnPacketCaptured(const PacketInfo& packet) {
         groupInfo.sourcePort = packet.sourcePort;
         groupInfo.destPort = packet.destPort;
         groupInfo.direction = packet.direction;
+        groupInfo.processPath = GetProcessPath(packet.processId);
+
+        // Инициализируем размер и счетчик для нового пакета
+        groupInfo.totalSize = packet.size;
+        groupInfo.packetCount = 1;
 
         std::string key = groupInfo.GetKey();
         bool isNewPacket = false;
 
         {
             std::lock_guard<std::mutex> lock(groupedPacketsMutex);
-            // Добавляем только если такого ключа ещё не было
-            if (groupedPackets.find(key) == groupedPackets.end()) {
+            auto it = groupedPackets.find(key);
+            if (it == groupedPackets.end()) {
+                // Новый уникальный пакет
                 isNewPacket = true;
+                groupInfo.time = GetLocalSystemTime();
                 groupedPacketView.order.push_back(key);
+
                 if (groupedPacketView.order.size() > MAX_DISPLAYED_PACKETS) {
                     std::string toRemove = groupedPacketView.order.front();
                     groupedPacketView.order.pop_front();
@@ -896,6 +1093,14 @@ bool MainWindow::OnPacketCaptured(const PacketInfo& packet) {
                     displayedKeys.erase(toRemove);
                 }
             }
+            else {
+                // Обновляем существующий пакет
+                groupInfo.time = it->second.time;
+                groupInfo.processPath = it->second.processPath;
+                groupInfo.totalSize = it->second.totalSize + packet.size;
+                groupInfo.packetCount = it->second.packetCount + 1;
+            }
+
             groupedPackets[key] = groupInfo;
             if (!selectedAdapterIp.empty()) {
                 adapterPackets[selectedAdapterIp] = groupedPackets;
@@ -1018,20 +1223,29 @@ std::shared_ptr<GroupedPacketInfo> MainWindow::GetPacketInfo(const std::string& 
     return nullptr;
 }
 
-void MainWindow::CopyTextToClipboard(const std::string& text) {
+// Добавим вспомогательную функцию для копирования в буфер обмена
+void MainWindow::CopyToClipboard(const std::string& text) {
     if (text.empty()) return;
 
-    if (OpenClipboard(hwnd)) {
-        EmptyClipboard();
-        size_t len = text.length() + 1;
-        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
-        if (hMem) {
-            memcpy(GlobalLock(hMem), text.c_str(), len);
+    if (!OpenClipboard(hwnd)) return;
+
+    EmptyClipboard();
+
+    // Конвертируем в широкие символы для лучшей совместимости
+    std::wstring wtext = StringToWString(text);
+    size_t len = (wtext.length() + 1) * sizeof(wchar_t);
+
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+    if (hMem) {
+        wchar_t* pMem = (wchar_t*)GlobalLock(hMem);
+        if (pMem) {
+            wcscpy_s(pMem, wtext.length() + 1, wtext.c_str());
             GlobalUnlock(hMem);
-            SetClipboardData(CF_TEXT, hMem);
+            SetClipboardData(CF_UNICODETEXT, hMem);
         }
-        CloseClipboard();
     }
+
+    CloseClipboard();
 }
 
 void MainWindow::AddBlockingRule(const std::string& ip) {
@@ -1044,75 +1258,55 @@ void MainWindow::AddBlockingRule(const std::string& ip) {
 
 void MainWindow::OnPacketCommand(WPARAM wParam) {
     int selectedIndex = ListView_GetNextItem(connectionsListView.GetHandle(), -1, LVNI_SELECTED);
-    if (selectedIndex == -1)
-        return;
+    if (selectedIndex == -1) return;
 
-    std::string key = GetPacketKeyFromListView(selectedIndex);
-    if (key.empty())
-        return;
+    // Получаем данные пакета напрямую из ListView
+    wchar_t sourceIp[256] = { 0 };
+    wchar_t destIp[256] = { 0 };
 
-    auto packet = GetPacketInfo(key);
-    if (!packet)
-        return;
+    ListView_GetItemText(connectionsListView.GetHandle(), selectedIndex, 1, sourceIp, 256);
+    ListView_GetItemText(connectionsListView.GetHandle(), selectedIndex, 3, destIp, 256);
+
+    std::string srcIp = WStringToString(sourceIp);
+    std::string dstIp = WStringToString(destIp);
 
     switch (LOWORD(wParam)) {
     case CMD_PACKET_PROPERTIES: {
-        OutputDebugStringA("Opening properties dialog...\n");
-        DialogBoxParam(
-            GetModuleHandle(NULL),
-            MAKEINTRESOURCE(IDD_PACKET_PROPERTIES),
-            hwnd,
-            PacketPropertiesDialogProc,
-            reinterpret_cast<LPARAM>(packet.get())
-        );
-        break;
-    }
-
-    case CMD_COPY_SOURCE_IP: {
-        OutputDebugStringA(("Copying source IP: " + packet->sourceIp + "\n").c_str());
-        if (!packet->sourceIp.empty()) {
-            if (OpenClipboard(hwnd)) {
-                EmptyClipboard();
-                size_t len = packet->sourceIp.length() + 1;
-                HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
-                if (hMem) {
-                    memcpy(GlobalLock(hMem), packet->sourceIp.c_str(), len);
-                    GlobalUnlock(hMem);
-                    SetClipboardData(CF_TEXT, hMem);
-                }
-                CloseClipboard();
+        std::string key = GetPacketKeyFromListView(selectedIndex);
+        if (!key.empty()) {
+            auto packet = GetPacketInfo(key);
+            if (packet) {
+                DialogBoxParam(
+                    GetModuleHandle(NULL),
+                    MAKEINTRESOURCE(IDD_PACKET_PROPERTIES),
+                    hwnd,
+                    PacketPropertiesDialogProc,
+                    reinterpret_cast<LPARAM>(packet.get())
+                );
             }
         }
         break;
     }
 
-    case CMD_COPY_DEST_IP: {
-        OutputDebugStringA(("Copying dest IP: " + packet->destIp + "\n").c_str());
-        if (!packet->destIp.empty()) {
-            if (OpenClipboard(hwnd)) {
-                EmptyClipboard();
-                size_t len = packet->destIp.length() + 1;
-                HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
-                if (hMem) {
-                    memcpy(GlobalLock(hMem), packet->destIp.c_str(), len);
-                    GlobalUnlock(hMem);
-                    SetClipboardData(CF_TEXT, hMem);
-                }
-                CloseClipboard();
-            }
-        }
+    case CMD_COPY_SOURCE_IP:
+        CopyToClipboard(srcIp);
         break;
-    }
+
+    case CMD_COPY_DEST_IP:
+        CopyToClipboard(dstIp);
+        break;
+
     case CMD_BLOCK_IP: {
-        std::wstring msg = L"Заблокировать IP " + StringToWString(packet->sourceIp) + L"?";
-        if (MessageBox(hwnd, msg.c_str(), L"Подтверждение", MB_YESNO | MB_ICONQUESTION) == IDYES) {
-            AddBlockingRule(packet->sourceIp);
+        std::wstring msg = L"Заблокировать IP " + StringToWString(srcIp) + L"?";
+        if (MessageBox(hwnd, msg.c_str(), L"Подтверждение",
+            MB_YESNO | MB_ICONQUESTION) == IDYES) {
+            AddBlockingRule(srcIp);
         }
         break;
     }
 
     case CMD_WHOIS_IP: {
-        std::wstring url = L"https://whois.domaintools.com/" + StringToWString(packet->sourceIp);
+        std::wstring url = L"https://whois.domaintools.com/" + StringToWString(srcIp);
         ShellExecute(NULL, L"open", url.c_str(), NULL, NULL, SW_SHOWNORMAL);
         break;
     }
@@ -1123,7 +1317,6 @@ void MainWindow::OnContextMenu(HWND hwnd, int x, int y) {
     if (hwnd != connectionsListView.GetHandle())
         return;
 
-    // Получаем выбранный индекс
     int selectedIndex = ListView_GetNextItem(connectionsListView.GetHandle(), -1, LVNI_SELECTED);
     if (selectedIndex == -1)
         return;
@@ -1138,6 +1331,8 @@ void MainWindow::OnContextMenu(HWND hwnd, int x, int y) {
     }
 
     HMENU hMenu = CreatePopupMenu();
+    if (!hMenu) return;
+
     AppendMenu(hMenu, MF_STRING, CMD_PACKET_PROPERTIES, L"Свойства");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, CMD_COPY_SOURCE_IP, L"Копировать IP источника");
@@ -1146,8 +1341,10 @@ void MainWindow::OnContextMenu(HWND hwnd, int x, int y) {
     AppendMenu(hMenu, MF_STRING, CMD_BLOCK_IP, L"Заблокировать IP");
     AppendMenu(hMenu, MF_STRING, CMD_WHOIS_IP, L"Whois для IP");
 
+    // Важно: отправляем команды в главное окно
     TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON,
-        pt.x, pt.y, 0, hwnd, NULL);
+        pt.x, pt.y, 0, this->hwnd, NULL);
+
     DestroyMenu(hMenu);
 }
 
@@ -1163,6 +1360,16 @@ void MainWindow::ShowPacketProperties(int itemIndex) {
         hwnd,
         PacketPropertiesDialogProc,
         reinterpret_cast<LPARAM>(&packet));
+}
+
+void MainWindow::OpenRulesDialog() {
+    MessageBox(hwnd, L"Окно с правилами будет реализовано.", L"Правила", MB_OK | MB_ICONINFORMATION);
+    // Здесь можно вызвать диалог или открыть отдельное окно с правилами
+}
+
+void MainWindow::OpenSettingsDialog() {
+    MessageBox(hwnd, L"Окно с настройками будет реализовано.", L"Настройки", MB_OK | MB_ICONINFORMATION);
+    // Здесь можно вызвать диалог или открыть отдельное окно с настройками
 }
 
 void MainWindow::OnAdapterSelected() {
@@ -1272,6 +1479,18 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
                     return 0;
                 }
                 break;
+            case IDC_OPEN_RULES:
+                if (wmEvent == BN_CLICKED) {
+                    window->OpenRulesDialog();
+                    return 0;
+                }
+                break;
+            case IDC_OPEN_SETTINGS:
+                if (wmEvent == BN_CLICKED) {
+                    window->OpenSettingsDialog();
+                    return 0;
+                }
+                break;
             case ID_CLEAR_SAVED_PACKETS:
                 if (wmEvent == BN_CLICKED) {
                     window->ClearSavedAdapterPackets(window->selectedAdapterIp);
@@ -1329,11 +1548,19 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
 INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_INITDIALOG: {
-        // Получаем указатель на пакет из lParam
         GroupedPacketInfo* packet = reinterpret_cast<GroupedPacketInfo*>(lParam);
         if (!packet) return FALSE;
 
-        // Заполняем поля диалога
+        // Время первого появления пакета
+        if (!packet->time.empty()) {
+            std::wstring timeStr = L"Первое появление: " + StringToWString(packet->time);
+            SetDlgItemText(hwnd, IDC_TIME, timeStr.c_str());
+        }
+        else {
+            SetDlgItemText(hwnd, IDC_TIME, L"Время не определено");
+        }
+
+        // Сетевая информация
         SetDlgItemText(hwnd, IDC_SOURCE,
             (StringToWString(packet->sourceIp) + L":" +
                 std::to_wstring(packet->sourcePort)).c_str());
@@ -1345,14 +1572,32 @@ INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPA
         SetDlgItemText(hwnd, IDC_PROTOCOL,
             StringToWString(packet->protocol).c_str());
 
+        // Информация о процессе
         SetDlgItemText(hwnd, IDC_PID,
             std::to_wstring(packet->processId).c_str());
 
         SetDlgItemText(hwnd, IDC_PROCESS_NAME,
             StringToWString(packet->processName).c_str());
 
-        // Сохраняем указатель на пакет для использования в других обработчиках
+        // Путь процесса - если путь пустой, пробуем получить его снова
+        std::string processPath = packet->processPath;
+        if (processPath.empty()) {
+            processPath = GetProcessPath(packet->processId);
+        }
+
+        SetDlgItemText(hwnd, IDC_PROCESS_PATH,
+            processPath.empty() ? L"(путь недоступен)" : StringToWString(processPath).c_str());
+
+        // Размер и количество пакетов
+        std::wstring sizeStr = FormatFileSize(packet->totalSize) +
+            L" (всего пакетов: " +
+            std::to_wstring(packet->packetCount) + L")";
+        SetDlgItemText(hwnd, IDC_SIZE, sizeStr.c_str());
+
+        // Сохраняем указатель на пакет
         SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(packet));
+        return TRUE;
+
         return TRUE;
     }
 
@@ -1363,7 +1608,7 @@ INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPA
             EndDialog(hwnd, LOWORD(wParam));
             return TRUE;
 
-        /*case IDC_BLOCK_IP: {
+        case IDC_BLOCK_IP: {
             auto packet = reinterpret_cast<GroupedPacketInfo*>(
                 GetWindowLongPtr(hwnd, GWLP_USERDATA));
             if (packet) {
@@ -1371,11 +1616,11 @@ INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPA
                     StringToWString(packet->sourceIp) + L"?";
                 if (MessageBox(hwnd, msg.c_str(), L"Подтверждение",
                     MB_YESNO | MB_ICONQUESTION) == IDYES) {
-                    AddBlockingRule(packet->sourceIp);
+                    //AddBlockingRule(packet->sourceIp);
                 }
             }
             return TRUE;
-        }*/
+        }
         }
         break;
     }

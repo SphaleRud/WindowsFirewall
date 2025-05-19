@@ -21,6 +21,8 @@
 #define IDC_STOP_CAPTURE                1004
 #define IDC_PACKET_LIST                 1005
 #define IDC_ADAPTER_COMBO               1006
+#define IDC_OPEN_RULES					1007
+#define IDC_OPEN_SETTINGS				1008
 #define IDD_SELECT_ADAPTER              2000
 #define IDC_ADAPTER_LIST                2001
 #define IDD_PACKET_PROPERTIES			3001
@@ -33,6 +35,9 @@
 #define IDC_PROCESS_NAME				3008
 #define IDC_PROCESS_PATH				3009
 #define IDC_BLOCK_IP					3010
+#define IDI_ICON_PLAY					5001
+#define IDI_ICON_STOP					5002
+#define IDI_ICON_SETTINGS				5003
 #define IDC_STATIC                      -1
 
 // Next default values for new objects

@@ -165,11 +165,15 @@ struct GroupedPacketInfo {
     std::string destIp;
     std::string protocol;
     std::string processName;
+    std::string processPath;
     std::string time;
     uint32_t processId;
     uint16_t sourcePort;
     uint16_t destPort;
     PacketDirection direction;
+    size_t size;
+    uint64_t totalSize;      // Общий размер всех пакетов
+    uint32_t packetCount;    // Количество пакетов в группе
 
     // Ключ для группировки (теперь с processId, нормализованный processName)
     std::string GetKey() const {
@@ -197,12 +201,9 @@ struct GroupedPacketInfo {
             std::to_string(processId) + "_" +
             (direction == PacketDirection::Incoming ? "in" : "out");
     }
-    GroupedPacketInfo() :
-        processId(0),
-        sourcePort(0),
-        destPort(0),
-        direction(PacketDirection::Incoming)
-    {
+    GroupedPacketInfo() : processId(0), sourcePort(0), destPort(0),
+        totalSize(0), packetCount(0),
+        direction(PacketDirection::Incoming) {
     }
 };
 

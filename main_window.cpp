@@ -52,6 +52,7 @@ MainWindow::MainWindow() : hwnd(nullptr), hInstance(nullptr), adapterInfoLabel(n
 }
 
 MainWindow::~MainWindow() {
+    adapterPackets.clear();
     if (packetInterceptor.IsCapturing()) {
         packetInterceptor.StopCapture();
     }
@@ -180,6 +181,74 @@ bool MainWindow::CreateMainWindow() {
     return CreateControls();
 }
 
+void MainWindow::SaveAdapterPackets(const std::string& adapter) {
+    if (adapter.empty()) {
+        MessageBox(hwnd, L"Адаптер не выбран!", L"Ошибка", MB_OK | MB_ICONERROR);
+        return;
+    }
+    std::string filename = "packets_" + adapter + ".csv";
+    std::ofstream fout(filename, std::ios::trunc);
+    if (!fout) {
+        MessageBox(hwnd, L"Не удалось создать файл!", L"Ошибка", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (groupedPackets.empty()) {
+        MessageBox(hwnd, L"Нет ни одного пакета для сохранения!", L"Инфо", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    for (const auto& pair : groupedPackets) {
+        const auto& pkt = pair.second;
+        fout << pkt.sourceIp << ','
+            << pkt.destIp << ','
+            << pkt.protocol << ','
+            << pkt.processName << ','
+            << pkt.processId << ','
+            << pkt.time << ','
+            << pkt.sourcePort << ','
+            << pkt.destPort << ','
+            << (pkt.direction == PacketDirection::Incoming ? "in" : "out") << '\n';
+    }
+    fout.close();
+    MessageBox(hwnd, L"Список успешно сохранён!", L"Инфо", MB_OK | MB_ICONINFORMATION);
+}
+
+void MainWindow::LoadAdapterPackets(const std::string& adapter) {
+    std::string filename = "packets_" + adapter + ".csv";
+    std::ifstream fin(filename);
+    if (!fin) return;
+    std::map<std::string, GroupedPacketInfo> loaded;
+    std::string line;
+    while (std::getline(fin, line)) {
+        std::stringstream ss(line);
+        GroupedPacketInfo pkt;
+        std::string dir;
+        std::getline(ss, pkt.sourceIp, ',');
+        std::getline(ss, pkt.destIp, ',');
+        std::getline(ss, pkt.protocol, ',');
+        std::getline(ss, pkt.processName, ',');
+        std::string pidstr;
+        std::getline(ss, pidstr, ',');
+        pkt.processId = static_cast<uint32_t>(std::stoul(pidstr));
+        std::getline(ss, pkt.time, ',');
+        std::string sp, dp;
+        std::getline(ss, sp, ',');
+        pkt.sourcePort = static_cast<uint16_t>(std::stoi(sp));
+        std::getline(ss, dp, ',');
+        pkt.destPort = static_cast<uint16_t>(std::stoi(dp));
+        std::getline(ss, dir, ',');
+        pkt.direction = (dir == "in") ? PacketDirection::Incoming : PacketDirection::Outgoing;
+        loaded[pkt.GetKey()] = pkt;
+    }
+    fin.close();
+    adapterPackets[adapter] = loaded;
+}
+
+void MainWindow::ClearSavedAdapterPackets(const std::string& adapter) {
+    std::string filename = "packets_" + adapter + ".csv";
+    std::remove(filename.c_str());
+}
+
+
 LRESULT MainWindow::HandleCommand(WPARAM wParam, LPARAM lParam) {
     switch (LOWORD(wParam)) {
     case IDC_SELECT_ADAPTER:
@@ -190,6 +259,14 @@ LRESULT MainWindow::HandleCommand(WPARAM wParam, LPARAM lParam) {
         break;
     case IDC_STOP_CAPTURE:
         OnStopCapture();
+        break;
+    case ID_SAVE_PACKETS:
+        SaveAdapterPackets(selectedAdapterIp);
+        MessageBox(hwnd, L"Список сохранён!", L"Info", MB_OK);
+        break;
+    case ID_CLEAR_SAVED_PACKETS:
+        ClearSavedAdapterPackets(selectedAdapterIp);
+        MessageBox(hwnd, L"Сохранённый список удалён!", L"Info", MB_OK);
         break;
     }
     return 0;
@@ -492,11 +569,30 @@ bool MainWindow::CreateControls() {
         hInstance, NULL
     );
 
-    // Комбо-бокс переместим правее
+    // Кнопка Сохранить список
+    CreateWindowEx(
+        0, WC_BUTTON, L"Save List",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        MARGIN + 2 * (BUTTON_WIDTH + MARGIN), buttonY,
+        BUTTON_WIDTH, BUTTON_HEIGHT,
+        hwnd, (HMENU)ID_SAVE_PACKETS,
+        hInstance, NULL
+    );
+    // Кнопка Очистить сохранённое
+    CreateWindowEx(
+        0, WC_BUTTON, L"Clear Saved",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        MARGIN + 3 * (BUTTON_WIDTH + MARGIN), buttonY,
+        BUTTON_WIDTH, BUTTON_HEIGHT,
+        hwnd, (HMENU)ID_CLEAR_SAVED_PACKETS,
+        hInstance, NULL
+    );
+
+    // Комбо-бокс размещаем справа от всех кнопок с большим отступом
     HWND adapterCombo = CreateWindowEx(
         0, WC_COMBOBOX, L"",
         WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-        WINDOW_WIDTH - BUTTON_WIDTH - MARGIN * 3 - COMBO_WIDTH, buttonY,
+        MARGIN + 4 * (BUTTON_WIDTH + MARGIN) + MARGIN, buttonY, // <-- сдвиг вправо
         COMBO_WIDTH, COMBO_HEIGHT,
         hwnd, (HMENU)IDC_ADAPTER_COMBO,
         hInstance, NULL
@@ -647,6 +743,7 @@ void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
         groupInfo.sourceIp = packet.sourceIp;
         groupInfo.destIp = packet.destIp;
         groupInfo.protocol = packet.protocol;
+        groupInfo.processId = packet.processId;
         groupInfo.processName = packet.processName;
         groupInfo.sourcePort = packet.sourcePort;
         groupInfo.destPort = packet.destPort;
@@ -657,6 +754,11 @@ void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
 
         if (it == groupedPackets.end()) {
             groupedPackets[key] = groupInfo;
+        }
+
+        // --- Сохраняем в общий map ---
+        if (!selectedAdapterIp.empty()) {
+            adapterPackets[selectedAdapterIp] = groupedPackets;
         }
 
         static DWORD lastUpdate = GetTickCount();
@@ -758,6 +860,11 @@ void MainWindow::AddSystemMessage(const std::wstring& message) {
 }
 
 void MainWindow::OnAdapterSelected() {
+    // Сохраняем текущий список под старым ключом
+    if (!selectedAdapterIp.empty()) {
+        adapterPackets[selectedAdapterIp] = groupedPackets;
+    }
+
     HWND comboBox = GetDlgItem(hwnd, IDC_ADAPTER_COMBO);
     int selectedIndex = SendMessage(comboBox, CB_GETCURSEL, 0, 0);
 
@@ -766,8 +873,18 @@ void MainWindow::OnAdapterSelected() {
         if (selectedIndex < static_cast<int>(adapters.size())) {
             selectedAdapterIp = adapters[selectedIndex].address;
             UpdateAdapterInfo();
-            connectionsListView.Clear();
-            // Активируем кнопку Start Capture
+            // Восстанавливаем список
+            if (adapterPackets.count(selectedAdapterIp))
+                groupedPackets = adapterPackets[selectedAdapterIp];
+            else {
+                // Попробуем автозагрузить сохранённый список (если есть)
+                LoadAdapterPackets(selectedAdapterIp);
+                if (adapterPackets.count(selectedAdapterIp))
+                    groupedPackets = adapterPackets[selectedAdapterIp];
+                else
+                    groupedPackets.clear();
+            }
+            UpdateGroupedPackets();
             EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
         }
     }

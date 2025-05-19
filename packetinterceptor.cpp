@@ -183,6 +183,68 @@ std::string PacketInterceptor::GetProtocolName(unsigned char protocol) {  // И�
     case IPPROTO_IP:   // 0
         return "IP";
         // Дополнительные протоколы по их числовым значениям
+    case 7:
+        return "ISO TP4";
+    case 20:
+        return "HMP";
+    case 44:
+        return "FRAG";
+    case 53:
+        return "SWIPE";
+    case 60:
+        return "IPv6 Destination Options";
+    case 61:
+        return "Any Host Internal Protocol";
+    case 62:
+        return "CFTP (CFTP)";
+    case 64:
+        return "SATNET and Backroom EXPAK";
+    case 82:
+        return "VRRP";
+    case 92:
+        return "MTP";
+    case 93:
+        return "AX.25 Frames";
+    case 101:
+        return "PIPE";
+    case 104:
+        return "IPX in IP";
+    case 130:
+        return "SNP";
+    case 170:
+        return "Ethernet-over-IP";
+    case 181:
+        return "L2TPv3";
+    case 228:
+        return "GMTP";
+    case 236:
+        return "Reserved";
+    case 9:
+        return "IGRP";
+    case 21:
+        return "XNS-IDP";
+    case 108:
+        return "IPComp";
+    case 173:
+        return "DCCP";
+    case 187:
+        return "UDP-Lite";
+    case 193:
+        return "SCPS";
+    case 200:
+        return "IPv6-Opts";
+    case 225:
+        return "FC";
+    case 234:
+        return "Ethernet";
+    case 237:
+        return "Mobility Header";
+    case 239:
+        return "IPLT";
+    case 242:
+        return "Compaq Peer Protocol";
+    case 253:
+        return "Use for experimentation and testing";
     case 37:
         return "DDP";
     case 128:

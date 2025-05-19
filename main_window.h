@@ -7,11 +7,11 @@
 #include "listview.h"
 #include "resource.h"
 #include <map>
+#include <unordered_map>
+#include <string>
+#include <fstream>
 
-// Определяем пользовательское сообщение
 #define WM_UPDATE_PACKET (WM_USER + 1)
-
-
 
 class MainWindow {
 public:
@@ -19,16 +19,15 @@ public:
         ID_START_CAPTURE = 1003,
         ID_STOP_CAPTURE = 1004,
         ID_ADD_RULE = 1005,
-        ID_DELETE_RULE = 1006
+        ID_DELETE_RULE = 1006,
+        ID_SAVE_PACKETS = 2001,
+        ID_CLEAR_SAVED_PACKETS = 2002
     };
 
     MainWindow();
     ~MainWindow();
 
-    //void UpdateAdapterInfo(const std::string& adapterInfo);
-    //void UpdateAdapterInfo() { UpdateAdapterInfo("None"); }
     void UpdateAdapterInfo();
-
     bool Initialize(HINSTANCE hInstance);
     void Show(int nCmdShow);
 
@@ -53,10 +52,12 @@ private:
     static const int COMBO_WIDTH = 250;
 
     std::map<std::string, GroupedPacketInfo> groupedPackets;
-    static const size_t UPDATE_INTERVAL = 1000; // обновление каждую секунду
+    // Новый: map для каждого адаптера
+    std::unordered_map<std::string, std::map<std::string, GroupedPacketInfo>> adapterPackets;
+
+    static const size_t UPDATE_INTERVAL = 1000;
 
     static std::wstring FormatFileSize(size_t bytes);
-
 
     void UpdateGroupedPackets();
 
@@ -76,7 +77,7 @@ private:
     void OnAdapterSelected();
     void StartCapture();
     void StopCapture();
-    
+
     std::wstring GetAdapterDisplayName() const;
     void AddSystemMessage(const std::wstring& message);
     void ProcessPacket(const PacketInfo& info);
@@ -87,6 +88,11 @@ private:
     void AddRule();
     void UpdateRulesList();
     void UpdateConnectionsList();
+
+    // Сохранение/загрузка/очистка списков
+    void SaveAdapterPackets(const std::string& adapter);
+    void LoadAdapterPackets(const std::string& adapter);
+    void ClearSavedAdapterPackets(const std::string& adapter);
 
     HWND hwnd;
     HWND adapterInfoLabel;
@@ -100,7 +106,6 @@ private:
     std::mutex packetMutex;
 };
 
-// Определяем константы для размеров и позиций элементов управления
 namespace WindowConstants {
     constexpr int DEFAULT_WINDOW_WIDTH = 800;
     constexpr int DEFAULT_WINDOW_HEIGHT = 600;

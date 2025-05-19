@@ -262,25 +262,6 @@ void MainWindow::ClearSavedAdapterPackets(const std::string& adapter) {
     MessageBox(hwnd, L"Список успешно удалён!", L"Инфо", MB_OK | MB_ICONINFORMATION);
 }
 
-LRESULT MainWindow::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch (uMsg) {
-    case WM_CREATE:
-        SetTimer(hwnd, 1, UPDATE_INTERVAL, NULL);
-        break;
-
-    case WM_TIMER:
-        if (wParam == 1) {
-            UpdateGroupedPackets();
-        }
-        break;
-
-    case WM_DESTROY:
-        KillTimer(hwnd, 1);
-        break;
-    }
-    return 0;
-}
-
 LRESULT MainWindow::HandlePacketUpdate(WPARAM wParam, LPARAM lParam) {
     PacketInfo* packetInfo = reinterpret_cast<PacketInfo*>(lParam);
     if (packetInfo) {
@@ -364,27 +345,29 @@ std::wstring MainWindow::GetAdapterDisplayName() const {
 }
 
 void MainWindow::OnStartCapture() {
-    if (selectedAdapterIp.empty()) {
-        MessageBox(hwnd, L"Please select an adapter first", L"Error", MB_OK | MB_ICONERROR);
-        return;
-    }
+     if (selectedAdapterIp.empty()) {
+         MessageBox(hwnd, L"Please select an adapter first", L"Error", MB_OK | MB_ICONERROR);
+         return;
+     }
 
-    // Устанавливаем callback для обработки пакетов
-    packetInterceptor.SetPacketCallback([this](const PacketInfo& packet) {
-        // Используем PostMessage для безопасного обновления UI из другого потока
-        PacketInfo* packetCopy = new PacketInfo(packet);
-        PostMessage(hwnd, WM_APP + 2, 0, (LPARAM)packetCopy);
-        });
+     // Устанавливаем callback для обработки пакетов
+     OutputDebugStringA("OnStartCapture: SetPacketCallback called!\n");
+     packetInterceptor.SetPacketCallback([this](const PacketInfo& packet) {
+         OutputDebugStringA("Packet callback called!\n");
+         // Используем PostMessage для безопасного обновления UI из другого потока
+         PacketInfo* packetCopy = new PacketInfo(packet);
+         PostMessage(hwnd, WM_APP + 2, 0, (LPARAM)packetCopy);
+         });
 
-    if (packetInterceptor.StartCapture(selectedAdapterIp)) {
-        isCapturing = true;
-        EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), FALSE);
-        EnableWindow(GetDlgItem(hwnd, IDC_STOP_CAPTURE), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_ADAPTER_COMBO), FALSE);
-    }
-    else {
-        MessageBox(hwnd, L"Failed to start capture", L"Error", MB_OK | MB_ICONERROR);
-    }
+     if (packetInterceptor.StartCapture(selectedAdapterIp)) {
+         isCapturing = true;
+         EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), FALSE);
+         EnableWindow(GetDlgItem(hwnd, IDC_STOP_CAPTURE), TRUE);
+         EnableWindow(GetDlgItem(hwnd, IDC_ADAPTER_COMBO), FALSE);
+     }
+     else {
+         MessageBox(hwnd, L"Failed to start capture", L"Error", MB_OK | MB_ICONERROR);
+     }
 }
 
 void MainWindow::OnStopCapture() {
@@ -704,6 +687,8 @@ void MainWindow::OnPacketReceived(const PacketInfo& info) {
 
 const size_t MAX_DISPLAYED_PACKETS = 100;
 
+#include <vector>
+// ...
 void MainWindow::UpdateGroupedPackets() {
     connectionsListView.SetRedraw(false);
     connectionsListView.Clear();
@@ -714,31 +699,38 @@ void MainWindow::UpdateGroupedPackets() {
         copy = groupedPackets;
     }
 
-    size_t count = 0;
-    for (const auto& pair : copy) {
-        if (++count > MAX_DISPLAYED_PACKETS) break;
-        const auto& packet = pair.second;
+    // Соберём все элементы в vector, чтобы обратиться к последним N
+    std::vector<const GroupedPacketInfo*> lastPackets;
+    for (const auto& pair : copy)
+        lastPackets.push_back(&pair.second);
+
+    size_t total = lastPackets.size();
+    size_t start = (total > MAX_DISPLAYED_PACKETS) ? total - MAX_DISPLAYED_PACKETS : 0;
+    for (size_t i = start; i < total; ++i) {
+        const auto& packet = *lastPackets[i];
         std::vector<std::wstring> items;
         items.reserve(8);
 
-        items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий"); // 0
-        items.push_back(StringToWString(packet.sourceIp));                                           // 1
-        items.push_back(std::to_wstring(packet.sourcePort));                                         // 2
-        items.push_back(StringToWString(packet.destIp));                                             // 3
-        items.push_back(std::to_wstring(packet.destPort));                                           // 4
-        items.push_back(StringToWString(packet.protocol));                                           // 5
-        items.push_back(std::to_wstring(packet.processId));                                          // 6
-        items.push_back(StringToWString(packet.processName));                                        // 7
+        items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий");
+        items.push_back(StringToWString(packet.sourceIp));
+        items.push_back(std::to_wstring(packet.sourcePort));
+        items.push_back(StringToWString(packet.destIp));
+        items.push_back(std::to_wstring(packet.destPort));
+        items.push_back(StringToWString(packet.protocol));
+        items.push_back(std::to_wstring(packet.processId));
+        items.push_back(StringToWString(packet.processName));
 
         connectionsListView.AddItem(items);
     }
 
+    OutputDebugStringA(("groupedPackets size: " + std::to_string(copy.size()) + "\n").c_str());
     connectionsListView.SetRedraw(true);
     InvalidateRect(connectionsListView.GetHandle(), NULL, TRUE);
 }
 
 void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
     try {
+
         GroupedPacketInfo groupInfo;
         groupInfo.sourceIp = packet.sourceIp;
         groupInfo.destIp = packet.destIp;
@@ -759,6 +751,7 @@ void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
             }
         }
         // Не вызывай UpdateGroupedPackets здесь!
+        OutputDebugStringA(("Captured packet with key: " + key + "\n").c_str());
     }
     catch (const std::exception& e) {
         OutputDebugStringA(("OnPacketCaptured error: " + std::string(e.what()) + "\n").c_str());
@@ -889,6 +882,7 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lParam);
         window = reinterpret_cast<MainWindow*>(createStruct->lpCreateParams);
         SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(window));
+        SetTimer(hwnd, 1, UPDATE_INTERVAL, NULL);
     }
     else {
         window = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
@@ -922,6 +916,7 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         }
         case WM_APP + 2:
         {
+            OutputDebugStringA("WM_APP+2 received\n");
             PacketInfo* packet = (PacketInfo*)lParam;
             if (packet) {
                 window->OnPacketCaptured(*packet);
@@ -971,6 +966,11 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             // Если не обработали команду, передаем дальше
             return DefWindowProc(hwnd, msg, wParam, lParam);
         }
+        case WM_TIMER:
+            if (wParam == 1) {
+                window->UpdateGroupedPackets();
+            }
+            break;
         case WM_CLOSE: {
             if (window->isCapturing) {
                 window->OnStopCapture();
@@ -980,6 +980,7 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         }
 
         case WM_DESTROY: {
+            KillTimer(hwnd, 1);
             PostQuitMessage(0);
             return 0;
         }

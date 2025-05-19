@@ -42,6 +42,10 @@ public:
         return ListView_InsertColumn(hwnd, index, &lvc) != -1;
     }
 
+    void SetRedraw(bool enable) {
+        SendMessage(hwnd, WM_SETREDRAW, enable ? TRUE : FALSE, 0);
+    }
+
     bool AddItem(const std::vector<std::wstring>& items) {
         if (items.empty()) return false;
 

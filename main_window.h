@@ -42,7 +42,7 @@ protected:
     LRESULT HandlePacketUpdate(WPARAM wParam, LPARAM lParam);
 
 private:
-    static const int WINDOW_WIDTH = 800;
+    static const int WINDOW_WIDTH = 850;
     static const int WINDOW_HEIGHT = 600;
     static const int MARGIN = 10;
     static const int BUTTON_WIDTH = 120;

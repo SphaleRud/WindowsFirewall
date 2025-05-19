@@ -13,6 +13,8 @@ name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
 processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 // ID компонентов
+#define ID_SAVE_PACKETS 2001
+#define ID_CLEAR_SAVED_PACKETS 2002
 #define ID_RULES_LIST 1001
 #define ID_CONNECTIONS_LIST 1002
 #define ID_ADD_RULE 1003
@@ -186,6 +188,11 @@ void MainWindow::SaveAdapterPackets(const std::string& adapter) {
         MessageBox(hwnd, L"Адаптер не выбран!", L"Ошибка", MB_OK | MB_ICONERROR);
         return;
     }
+    char buf[MAX_PATH];
+    GetCurrentDirectoryA(MAX_PATH, buf);
+    // Показываем путь для отладки
+    // MessageBoxA(hwnd, buf, "Текущая папка", MB_OK);
+
     std::string filename = "packets_" + adapter + ".csv";
     std::ofstream fout(filename, std::ios::trunc);
     if (!fout) {
@@ -246,30 +253,12 @@ void MainWindow::LoadAdapterPackets(const std::string& adapter) {
 void MainWindow::ClearSavedAdapterPackets(const std::string& adapter) {
     std::string filename = "packets_" + adapter + ".csv";
     std::remove(filename.c_str());
-}
-
-
-LRESULT MainWindow::HandleCommand(WPARAM wParam, LPARAM lParam) {
-    switch (LOWORD(wParam)) {
-    case IDC_SELECT_ADAPTER:
-        OnSelectAdapter();
-        break;
-    case IDC_START_CAPTURE:
-        OnStartCapture();
-        break;
-    case IDC_STOP_CAPTURE:
-        OnStopCapture();
-        break;
-    case ID_SAVE_PACKETS:
-        SaveAdapterPackets(selectedAdapterIp);
-        MessageBox(hwnd, L"Список сохранён!", L"Info", MB_OK);
-        break;
-    case ID_CLEAR_SAVED_PACKETS:
-        ClearSavedAdapterPackets(selectedAdapterIp);
-        MessageBox(hwnd, L"Сохранённый список удалён!", L"Info", MB_OK);
-        break;
+    adapterPackets[adapter].clear();
+    if (adapter == selectedAdapterIp) {
+        groupedPackets.clear();
+        UpdateGroupedPackets();
     }
-    return 0;
+    MessageBox(hwnd, L"Список успешно удалён!", L"Инфо", MB_OK | MB_ICONINFORMATION);
 }
 
 LRESULT MainWindow::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -712,14 +701,20 @@ void MainWindow::OnPacketReceived(const PacketInfo& info) {
     PostMessage(hwnd, WM_UPDATE_PACKET, 0, 0);
 }
 
+const size_t MAX_DISPLAYED_PACKETS = 100;
+
 void MainWindow::UpdateGroupedPackets() {
     connectionsListView.Clear();
+
+    size_t count = 0;
+    connectionsListView.SetRedraw(false);
 
     // Добавляем пустую строку для разделения (можно удалить, если она не нужна)
     // std::vector<std::wstring> emptyRow(7);
     // connectionsListView.AddItem(emptyRow);
 
     for (const auto& pair : groupedPackets) {
+        if (++count > MAX_DISPLAYED_PACKETS) break;
         const auto& packet = pair.second;
         std::vector<std::wstring> items;
         items.reserve(7);
@@ -735,6 +730,9 @@ void MainWindow::UpdateGroupedPackets() {
 
         connectionsListView.AddItem(items);
     }
+
+    connectionsListView.SetRedraw(true);
+    InvalidateRect(connectionsListView.GetHandle(), NULL, TRUE);
 }
 
 void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
@@ -873,17 +871,17 @@ void MainWindow::OnAdapterSelected() {
         if (selectedIndex < static_cast<int>(adapters.size())) {
             selectedAdapterIp = adapters[selectedIndex].address;
             UpdateAdapterInfo();
-            // Восстанавливаем список
-            if (adapterPackets.count(selectedAdapterIp))
+
+            // Всегда пробуем загрузить список с диска для выбранного адаптера
+            LoadAdapterPackets(selectedAdapterIp);
+
+            if (adapterPackets.count(selectedAdapterIp) && !adapterPackets[selectedAdapterIp].empty()) {
                 groupedPackets = adapterPackets[selectedAdapterIp];
-            else {
-                // Попробуем автозагрузить сохранённый список (если есть)
-                LoadAdapterPackets(selectedAdapterIp);
-                if (adapterPackets.count(selectedAdapterIp))
-                    groupedPackets = adapterPackets[selectedAdapterIp];
-                else
-                    groupedPackets.clear();
             }
+            else {
+                groupedPackets.clear();
+            }
+
             UpdateGroupedPackets();
             EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
         }
@@ -892,7 +890,6 @@ void MainWindow::OnAdapterSelected() {
 
 LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     MainWindow* window = nullptr;
-
     if (msg == WM_CREATE) {
         CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lParam);
         window = reinterpret_cast<MainWindow*>(createStruct->lpCreateParams);
@@ -915,6 +912,16 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
                 window->selectedAdapterIp = adapters[0].address;
                 window->UpdateAdapterInfo();
                 EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
+                // PATCH: load packets for auto-selected adapter
+                window->LoadAdapterPackets(window->selectedAdapterIp);
+                if (window->adapterPackets.count(window->selectedAdapterIp) &&
+                    !window->adapterPackets[window->selectedAdapterIp].empty()) {
+                    window->groupedPackets = window->adapterPackets[window->selectedAdapterIp];
+                }
+                else {
+                    window->groupedPackets.clear();
+                }
+                window->UpdateGroupedPackets();
             }
             return 0;
         }
@@ -932,6 +939,18 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             int wmId = LOWORD(wParam);
             int wmEvent = HIWORD(wParam);
             switch (wmId) {
+            case ID_SAVE_PACKETS:
+                if (wmEvent == BN_CLICKED) {
+                    window->SaveAdapterPackets(window->selectedAdapterIp);
+                    return 0;
+                }
+                break;
+            case ID_CLEAR_SAVED_PACKETS:
+                if (wmEvent == BN_CLICKED) {
+                    window->ClearSavedAdapterPackets(window->selectedAdapterIp);
+                    return 0;
+                }
+                break;
             case IDC_START_CAPTURE:
                 if (wmEvent == BN_CLICKED) {
                     window->OnStartCapture();
@@ -953,6 +972,7 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
                 }
                 break;
             }
+
             // Если не обработали команду, передаем дальше
             return DefWindowProc(hwnd, msg, wParam, lParam);
         }

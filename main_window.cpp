@@ -5,6 +5,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <mutex>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "ws2_32.lib")
@@ -704,20 +705,21 @@ void MainWindow::OnPacketReceived(const PacketInfo& info) {
 const size_t MAX_DISPLAYED_PACKETS = 100;
 
 void MainWindow::UpdateGroupedPackets() {
+    connectionsListView.SetRedraw(false);
     connectionsListView.Clear();
 
+    std::map<std::string, GroupedPacketInfo> copy;
+    {
+        std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+        copy = groupedPackets;
+    }
+
     size_t count = 0;
-    connectionsListView.SetRedraw(false);
-
-    // Добавляем пустую строку для разделения (можно удалить, если она не нужна)
-    // std::vector<std::wstring> emptyRow(7);
-    // connectionsListView.AddItem(emptyRow);
-
-    for (const auto& pair : groupedPackets) {
+    for (const auto& pair : copy) {
         if (++count > MAX_DISPLAYED_PACKETS) break;
         const auto& packet = pair.second;
         std::vector<std::wstring> items;
-        items.reserve(7);
+        items.reserve(8);
 
         items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий"); // 0
         items.push_back(StringToWString(packet.sourceIp));                                           // 1
@@ -725,7 +727,7 @@ void MainWindow::UpdateGroupedPackets() {
         items.push_back(StringToWString(packet.destIp));                                             // 3
         items.push_back(std::to_wstring(packet.destPort));                                           // 4
         items.push_back(StringToWString(packet.protocol));                                           // 5
-		items.push_back(std::to_wstring(packet.processId)); 									     // 6
+        items.push_back(std::to_wstring(packet.processId));                                          // 6
         items.push_back(StringToWString(packet.processName));                                        // 7
 
         connectionsListView.AddItem(items);
@@ -748,23 +750,15 @@ void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
         groupInfo.direction = packet.direction;
 
         std::string key = groupInfo.GetKey();
-        auto it = groupedPackets.find(key);
 
-        if (it == groupedPackets.end()) {
-            groupedPackets[key] = groupInfo;
+        {
+            std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+            groupedPackets[key] = groupInfo; // всегда обновляем
+            if (!selectedAdapterIp.empty()) {
+                adapterPackets[selectedAdapterIp] = groupedPackets;
+            }
         }
-
-        // --- Сохраняем в общий map ---
-        if (!selectedAdapterIp.empty()) {
-            adapterPackets[selectedAdapterIp] = groupedPackets;
-        }
-
-        static DWORD lastUpdate = GetTickCount();
-        DWORD currentTick = GetTickCount();
-        if (currentTick - lastUpdate > UPDATE_INTERVAL) {
-            UpdateGroupedPackets();
-            lastUpdate = currentTick;
-        }
+        // Не вызывай UpdateGroupedPackets здесь!
     }
     catch (const std::exception& e) {
         OutputDebugStringA(("OnPacketCaptured error: " + std::string(e.what()) + "\n").c_str());
@@ -790,13 +784,14 @@ void MainWindow::AddPacketToList(const PacketInfo& info) {
     items.push_back(std::to_wstring(info.processId)); 									   // 6
     items.push_back(StringToWString(info.processName));                                        // 7
 
+/*
     // Отладочный вывод
     wchar_t debug[512];
     swprintf_s(debug, L"Adding packet: Dir=%s, SrcIP=%s, SrcPort=%d, DstIP=%s, DstPort=%d, Proto=%s, Proc=%s\n",
         items[0].c_str(), items[1].c_str(), info.sourcePort,
         items[3].c_str(), info.destPort, items[5].c_str(), items[6].c_str());
     OutputDebugString(debug);
-
+*/
     int index = connectionsListView.AddItem(items);
     if (index < 0) {
         OutputDebugString(L"Failed to add item to ListView!\n");

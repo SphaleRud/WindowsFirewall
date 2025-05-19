@@ -51,6 +51,7 @@ private:
     static const int COMBO_HEIGHT = 200;
     static const int COMBO_WIDTH = 250;
 
+    std::mutex groupedPacketsMutex;
     std::map<std::string, GroupedPacketInfo> groupedPackets;
     // Новый: map для каждого адаптера
     std::unordered_map<std::string, std::map<std::string, GroupedPacketInfo>> adapterPackets;

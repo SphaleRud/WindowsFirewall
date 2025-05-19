@@ -520,7 +520,7 @@ void PacketInterceptor::CaptureThread(PacketInterceptor* interceptor) {
             }
 
             int result = pcap_next_ex(interceptor->handle, &header, &packet);
-
+/*
             switch (result) {
             case 1:  // Пакет успешно захвачен
                 OutputDebugStringA("Packet captured\n");
@@ -558,6 +558,7 @@ void PacketInterceptor::CaptureThread(PacketInterceptor* interceptor) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }
+*/
         }
     }
     catch (const std::exception& e) {
@@ -723,11 +724,11 @@ void PacketInterceptor::ProcessPacket(const pcap_pkthdr* header, const u_char* p
         if (info.protocol.empty()) info.protocol = "Unknown";
         if (info.processName.empty()) info.processName = "Unknown";
         if (info.time.empty()) info.time = "Unknown";
-
+/*
         char dbg[128];
         sprintf_s(dbg, "DEBUG: processId = %u\n", info.processId);
         OutputDebugStringA(dbg);
-
+*/
         // Callback
         packetCallback(info);
 

@@ -61,6 +61,23 @@ MainWindow::~MainWindow() {
     }
 }
 
+// Размещаем этот код в обработчике WM_TIMER или отдельном методе, который вызывается каждые 100-200 мс
+void MainWindow::ProcessPacketBatch() {
+    std::vector<PacketInfo> toDisplay;
+    {
+        std::lock_guard<std::mutex> lock(packetMutex);
+        while (!packetQueue.empty()) {
+            toDisplay.push_back(packetQueue.front());
+            packetQueue.pop_front();
+        }
+    }
+    for (const auto& pkt : toDisplay) {
+        OnPacketCaptured(pkt); // твой метод отрисовки пакета в ListView
+    }
+    // После пачки — обнови ListView (например, UpdateGroupedPackets())
+    UpdateGroupedPackets();
+}
+
 bool MainWindow::Initialize(HINSTANCE hInstance) {
     // Регистрируем класс окна
     WNDCLASSEX wc = { 0 };
@@ -262,15 +279,6 @@ void MainWindow::ClearSavedAdapterPackets(const std::string& adapter) {
     MessageBox(hwnd, L"Список успешно удалён!", L"Инфо", MB_OK | MB_ICONINFORMATION);
 }
 
-LRESULT MainWindow::HandlePacketUpdate(WPARAM wParam, LPARAM lParam) {
-    PacketInfo* packetInfo = reinterpret_cast<PacketInfo*>(lParam);
-    if (packetInfo) {
-        AddPacketToList(*packetInfo);
-        delete packetInfo;
-    }
-    return 0;
-}
-
 void MainWindow::ProcessPacket(const PacketInfo& info) {
     // Преобразование времени
     std::wstring time = StringToWString(info.time);
@@ -354,9 +362,7 @@ void MainWindow::OnStartCapture() {
      OutputDebugStringA("OnStartCapture: SetPacketCallback called!\n");
      packetInterceptor.SetPacketCallback([this](const PacketInfo& packet) {
          OutputDebugStringA("Packet callback called!\n");
-         // Используем PostMessage для безопасного обновления UI из другого потока
-         PacketInfo* packetCopy = new PacketInfo(packet);
-         PostMessage(hwnd, WM_APP + 2, 0, (LPARAM)packetCopy);
+         this->PushPacket(packet);
          });
 
      if (packetInterceptor.StartCapture(selectedAdapterIp)) {
@@ -676,16 +682,7 @@ bool MainWindow::InitializeConnectionsList(int yPosition) {
     return true;
 }
 
-// Обработка пакетов
-void MainWindow::OnPacketReceived(const PacketInfo& info) {
-    {
-        std::lock_guard<std::mutex> lock(packetMutex);
-        packetQueue.push(info);
-    }
-    PostMessage(hwnd, WM_UPDATE_PACKET, 0, 0);
-}
 
-const size_t MAX_DISPLAYED_PACKETS = 100;
 
 #include <vector>
 // ...
@@ -756,42 +753,6 @@ void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
     catch (const std::exception& e) {
         OutputDebugStringA(("OnPacketCaptured error: " + std::string(e.what()) + "\n").c_str());
     }
-}
-
-void MainWindow::AddPacketToList(const PacketInfo& info) {
-    if (!connectionsListView) {
-        OutputDebugString(L"ListView is not initialized!\n");
-        return;
-    }
-
-    std::vector<std::wstring> items;
-    items.reserve(7); // Резервируем место для 7 элементов
-
-    // Добавляем элементы в правильном порядке
-    items.push_back(info.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий");  // 0
-    items.push_back(StringToWString(info.sourceIp));                                            // 1
-    items.push_back(std::to_wstring(info.sourcePort));                                         // 2
-    items.push_back(StringToWString(info.destIp));                                             // 3
-    items.push_back(std::to_wstring(info.destPort));                                           // 4
-    items.push_back(StringToWString(info.protocol));                                           // 5
-    items.push_back(std::to_wstring(info.processId)); 									   // 6
-    items.push_back(StringToWString(info.processName));                                        // 7
-
-/*
-    // Отладочный вывод
-    wchar_t debug[512];
-    swprintf_s(debug, L"Adding packet: Dir=%s, SrcIP=%s, SrcPort=%d, DstIP=%s, DstPort=%d, Proto=%s, Proc=%s\n",
-        items[0].c_str(), items[1].c_str(), info.sourcePort,
-        items[3].c_str(), info.destPort, items[5].c_str(), items[6].c_str());
-    OutputDebugString(debug);
-*/
-    int index = connectionsListView.AddItem(items);
-    if (index < 0) {
-        OutputDebugString(L"Failed to add item to ListView!\n");
-        return;
-    }
-
-    ListView_EnsureVisible(connectionsListView.GetHandle(), index, FALSE);
 }
 
 // Управление захватом
@@ -968,7 +929,7 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         }
         case WM_TIMER:
             if (wParam == 1) {
-                window->UpdateGroupedPackets();
+                window->ProcessPacketBatch();
             }
             break;
         case WM_CLOSE: {

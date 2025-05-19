@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <string>
 #include <fstream>
+#include <deque>
 
 #define WM_UPDATE_PACKET (WM_USER + 1)
 
@@ -38,8 +39,6 @@ protected:
     bool CreateControls();
     void ShowAdapterSelectionDialog();
     static bool IsWifiAdapter(const std::string& description);
-    LRESULT HandleCommand(WPARAM wParam, LPARAM lParam);
-    LRESULT HandlePacketUpdate(WPARAM wParam, LPARAM lParam);
 
 private:
     static const int WINDOW_WIDTH = 850;
@@ -50,6 +49,22 @@ private:
     static const int LABEL_HEIGHT = 20;
     static const int COMBO_HEIGHT = 200;
     static const int COMBO_WIDTH = 250;
+
+    std::deque<PacketInfo> packetQueue;
+    std::mutex packetMutex;
+    static const size_t MAX_QUEUE_SIZE = 1000;
+    const size_t MAX_DISPLAYED_PACKETS = 5000;
+
+    // Помещаем новый пакет (вызывается из PacketInterceptor callback)
+    void PushPacket(const PacketInfo& pkt) {
+        std::lock_guard<std::mutex> lock(packetMutex);
+        if (packetQueue.size() >= MAX_QUEUE_SIZE) {
+            packetQueue.pop_front(); // удаляем самый старый
+        }
+        packetQueue.push_back(pkt);
+    }
+
+    void ProcessPacketBatch();
 
     std::mutex groupedPacketsMutex;
     std::map<std::string, GroupedPacketInfo> groupedPackets;
@@ -83,9 +98,7 @@ private:
     void AddSystemMessage(const std::wstring& message);
     void ProcessPacket(const PacketInfo& info);
     bool AutoSelectAdapter();
-    void OnPacketReceived(const PacketInfo& packet);
     void OnPacketCaptured(const PacketInfo& packet);
-    void AddPacketToList(const PacketInfo& packet);
     void AddRule();
     void UpdateRulesList();
     void UpdateConnectionsList();
@@ -103,8 +116,6 @@ private:
     PacketInterceptor packetInterceptor;
     std::string selectedAdapterIp;
     bool isCapturing;
-    std::queue<PacketInfo> packetQueue;
-    std::mutex packetMutex;
 };
 
 namespace WindowConstants {

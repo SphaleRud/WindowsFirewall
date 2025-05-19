@@ -442,7 +442,7 @@ bool PacketInterceptor::StartCapture(const std::string& adapterIp) {
     // Компилируем и устанавливаем фильтр
     struct bpf_program fcode;
     // Расширяем фильтр для захвата всех интересующих протоколов
-    const char* filter = "ip or arp or ip6";
+    const char* filter = "tcp or udp";
     if (pcap_compile(handle, &fcode, filter, 1, PCAP_NETMASK_UNKNOWN) < 0) {
         std::string error = "Failed to compile filter: " + std::string(pcap_geterr(handle));
         OutputDebugStringA(error.c_str());
@@ -659,86 +659,119 @@ void PacketInterceptor::ProcessPacket(const pcap_pkthdr* header, const u_char* p
         OutputDebugStringA("ProcessPacket: Invalid parameters\n");
         return;
     }
-
     try {
-        if (header->len < sizeof(IPHeader) + 14) return;
 
-        PacketInfo info = {};
-        info.processId = 0; // <-- явная инициализация
-        info.processName = "Unknown";
-
-        // Время
-        SYSTEMTIME st = {};
-        GetSystemTime(&st);
-        char timeBuffer[32] = {};
-        sprintf_s(timeBuffer, sizeof(timeBuffer), "%04d-%02d-%02d %02d:%02d:%02d",
-            st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-        info.time = timeBuffer;
-
-        // IP
-        const IPHeader* ipHeader = reinterpret_cast<const IPHeader*>(packet + 14);
-        char srcIP[INET_ADDRSTRLEN] = {}, dstIP[INET_ADDRSTRLEN] = {};
-        inet_ntop(AF_INET, &(ipHeader->sourceIP), srcIP, INET_ADDRSTRLEN);
-        inet_ntop(AF_INET, &(ipHeader->destIP), dstIP, INET_ADDRSTRLEN);
-        info.sourceIp = srcIP;
-        info.destIp = dstIP;
-
-        // Протокол, размер
-        info.protocol = GetProtocolName(ipHeader->protocol);
-        info.size = header->len;
-
-        // Сначала определяем направление!
-        info.direction = DeterminePacketDirection(srcIP);
-
-        // Порты
-        int ipHeaderLength = (ipHeader->headerLength & 0x0F) * 4;
-        info.sourcePort = 0;
-        info.destPort = 0;
-        if (ipHeader->protocol == IPPROTO_TCP) {
-            if (header->len >= (size_t)(14 + ipHeaderLength + sizeof(TCPHeader))) {
-                const TCPHeader* tcp = reinterpret_cast<const TCPHeader*>(packet + 14 + ipHeaderLength);
-                info.sourcePort = ntohs(tcp->sourcePort);
-                info.destPort = ntohs(tcp->destPort);
-            }
+        size_t len = header->len;
+        // --- Ограничение на поток пакетов ---
+        static std::atomic<size_t> packetCount = 0;
+        static std::atomic<time_t> lastTime = 0;
+        time_t now = time(nullptr);
+        if (now != lastTime) {
+            lastTime = now;
+            packetCount = 0;
         }
-        else if (ipHeader->protocol == IPPROTO_UDP) {
-            if (header->len >= (size_t)(14 + ipHeaderLength + sizeof(UDPHeader))) {
-                const UDPHeader* udp = reinterpret_cast<const UDPHeader*>(packet + 14 + ipHeaderLength);
-                info.sourcePort = ntohs(udp->sourcePort);
-                info.destPort = ntohs(udp->destPort);
-            }
+        if (++packetCount > 500) { // Не более 500 пакетов в секунду
+            return;
         }
 
-        // PID и имя процесса
-        uint32_t pid = 0;
-        std::string pname = "Unknown";
-        uint16_t localPort = (info.direction == PacketDirection::Outgoing) ? info.sourcePort : info.destPort;
-        GetProcessInfoByPortAndProto(localPort, info.protocol, pid, pname);
-        info.processId = pid;
-        info.processName = pname;
+        int ipOffset = 0;
+        bool hasEthernet = false;
 
-        // Проверяем и очищаем
-        if (info.sourceIp.empty()) info.sourceIp = "Unknown";
-        if (info.destIp.empty()) info.destIp = "Unknown";
-        if (info.protocol.empty()) info.protocol = "Unknown";
-        if (info.processName.empty()) info.processName = "Unknown";
-        if (info.time.empty()) info.time = "Unknown";
-        /*
-        char dbg[128];
-        sprintf_s(dbg, "DEBUG: processId = %u\n", info.processId);
-        OutputDebugStringA(dbg);
-        */
-        // Callback
-        packetCallback(info);
+        // --- Определяем, есть ли Ethernet header ---
+        if (len >= 14) {
+            uint16_t etherType = ntohs(*(uint16_t*)(packet + 12));
+            if (etherType == 0x0800 || etherType == 0x86DD) {
+                hasEthernet = true;
+                ipOffset = 14;
+            }
+        }
+        if (!hasEthernet) {
+            ipOffset = 0;
+            if (len < 20) return; // слишком короткий для IP
+        }
 
-        // Вызываем callback
-        try {
-            if (packetCallback) {
+        const u_char* ipStart = packet + ipOffset;
+
+        // --- Определяем версию IP ---
+        uint8_t version = (ipStart[0] >> 4) & 0x0F;
+        if (version == 4) {
+            if (len < ipOffset + 20) return;
+            const IPHeader* ipHeader = reinterpret_cast<const IPHeader*>(ipStart);
+
+            PacketInfo info = {};
+            info.processId = 0;
+            info.processName = "Unknown";
+
+            // Время
+            SYSTEMTIME st = {};
+            GetSystemTime(&st);
+            char timeBuffer[32] = {};
+            sprintf_s(timeBuffer, sizeof(timeBuffer), "%04d-%02d-%02d %02d:%02d:%02d",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+            info.time = timeBuffer;
+
+            // IP
+            char srcIP[INET_ADDRSTRLEN] = {}, dstIP[INET_ADDRSTRLEN] = {};
+            inet_ntop(AF_INET, &(ipHeader->sourceIP), srcIP, INET_ADDRSTRLEN);
+            inet_ntop(AF_INET, &(ipHeader->destIP), dstIP, INET_ADDRSTRLEN);
+            info.sourceIp = srcIP;
+            info.destIp = dstIP;
+
+            // Протокол, размер
+            info.protocol = GetProtocolName(ipHeader->protocol);
+            info.size = header->len;
+
+            info.direction = DeterminePacketDirection(srcIP);
+
+            // Порты
+            int ipHeaderLength = (ipHeader->headerLength & 0x0F) * 4;
+            info.sourcePort = 0;
+            info.destPort = 0;
+            if (ipHeader->protocol == IPPROTO_TCP) {
+                if (len >= ipOffset + ipHeaderLength + sizeof(TCPHeader)) {
+                    const TCPHeader* tcp = reinterpret_cast<const TCPHeader*>(ipStart + ipHeaderLength);
+                    info.sourcePort = ntohs(tcp->sourcePort);
+                    info.destPort = ntohs(tcp->destPort);
+                }
+            }
+            else if (ipHeader->protocol == IPPROTO_UDP) {
+                if (len >= ipOffset + ipHeaderLength + sizeof(UDPHeader)) {
+                    const UDPHeader* udp = reinterpret_cast<const UDPHeader*>(ipStart + ipHeaderLength);
+                    info.sourcePort = ntohs(udp->sourcePort);
+                    info.destPort = ntohs(udp->destPort);
+                }
+            }
+
+            // PID и имя процесса
+            uint32_t pid = 0;
+            std::string pname = "Unknown";
+            uint16_t localPort = (info.direction == PacketDirection::Outgoing) ? info.sourcePort : info.destPort;
+            GetProcessInfoByPortAndProto(localPort, info.protocol, pid, pname);
+            info.processId = pid;
+            info.processName = pname;
+
+            if (info.sourceIp.empty()) info.sourceIp = "Unknown";
+            if (info.destIp.empty()) info.destIp = "Unknown";
+            if (info.protocol.empty()) info.protocol = "Unknown";
+            if (info.processName.empty()) info.processName = "Unknown";
+            if (info.time.empty()) info.time = "Unknown";
+
+            // Callback
+            try {
                 packetCallback(info);
             }
+            catch (const std::exception& e) {
+                OutputDebugStringA(("ProcessPacket callback error: " + std::string(e.what()) + "\n").c_str());
+            }
         }
-        catch (const std::exception& e) {
-            OutputDebugStringA(("ProcessPacket callback error: " + std::string(e.what()) + "\n").c_str());
+        else if (version == 6) {
+            // Можно реализовать разбор IPv6
+            // Пока просто пропускаем такие пакеты
+            return;
+        }
+        else {
+            // Неизвестный протокол
+            return;
         }
     }
     catch (const std::exception& e) {

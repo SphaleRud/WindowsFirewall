@@ -600,108 +600,76 @@ void PacketInterceptor::ProcessPacket(const pcap_pkthdr* header, const u_char* p
     }
 
     try {
-        // Проверка размера пакета
-        if (header->len < sizeof(struct IPHeader) + 14) {
-            OutputDebugStringA("ProcessPacket: Packet too small\n");
-            return;
-        }
+        if (header->len < sizeof(IPHeader) + 14) return;
 
-        PacketInfo info = {}; // Инициализируем все поля нулями
+        PacketInfo info = {};
+        info.processId = 0; // <-- явная инициализация
+        info.processName = "Unknown";
 
-        // Безопасное получение времени
+        // Время
         SYSTEMTIME st = {};
         GetSystemTime(&st);
-
         char timeBuffer[32] = {};
-        if (sprintf_s(timeBuffer, sizeof(timeBuffer),
-            "%04d-%02d-%02d %02d:%02d:%02d",
-            st.wYear, st.wMonth, st.wDay,
-            st.wHour, st.wMinute, st.wSecond) > 0) {
-            info.time = timeBuffer;
-        }
-        else {
-            info.time = "Unknown Time";
-        }
+        sprintf_s(timeBuffer, sizeof(timeBuffer), "%04d-%02d-%02d %02d:%02d:%02d",
+                  st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+        info.time = timeBuffer;
 
-        // Безопасное извлечение IP заголовка
-        const IPHeader* ipHeader = nullptr;
-        try {
-            ipHeader = reinterpret_cast<const IPHeader*>(packet + 14);
-        }
-        catch (...) {
-            OutputDebugStringA("ProcessPacket: Failed to extract IP header\n");
-            return;
-        }
+        // IP
+        const IPHeader* ipHeader = reinterpret_cast<const IPHeader*>(packet + 14);
+        char srcIP[INET_ADDRSTRLEN] = {}, dstIP[INET_ADDRSTRLEN] = {};
+        inet_ntop(AF_INET, &(ipHeader->sourceIP), srcIP, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &(ipHeader->destIP), dstIP, INET_ADDRSTRLEN);
+        info.sourceIp = srcIP;
+        info.destIp = dstIP;
 
-        if (!ipHeader) {
-            OutputDebugStringA("ProcessPacket: Null IP header\n");
-            return;
-        }
-
-        // Безопасное преобразование IP адресов
-        char srcIP[INET_ADDRSTRLEN] = {};
-        char dstIP[INET_ADDRSTRLEN] = {};
-
-        if (inet_ntop(AF_INET, &(ipHeader->sourceIP), srcIP, INET_ADDRSTRLEN)) {
-            info.sourceIp = srcIP;
-        }
-        else {
-            info.sourceIp = "Unknown IP";
-        }
-
-        if (inet_ntop(AF_INET, &(ipHeader->destIP), dstIP, INET_ADDRSTRLEN)) {
-            info.destIp = dstIP;
-        }
-        else {
-            info.destIp = "Unknown IP";
-        }
-
-        // Установка остальных полей
+        // Протокол, размер
         info.protocol = GetProtocolName(ipHeader->protocol);
         info.size = header->len;
-        info.processName = "Unknown";
 
-        // Получаем размер IP заголовка
+        // Сначала определяем направление!
+        info.direction = DeterminePacketDirection(srcIP);
+
+        // Порты
         int ipHeaderLength = (ipHeader->headerLength & 0x0F) * 4;
-
-        // Извлекаем порты в зависимости от протокола
+        info.sourcePort = 0;
+        info.destPort = 0;
         if (ipHeader->protocol == IPPROTO_TCP) {
             if (header->len >= (size_t)(14 + ipHeaderLength + sizeof(TCPHeader))) {
-                const TCPHeader* tcpHeader = reinterpret_cast<const TCPHeader*>(packet + 14 + ipHeaderLength);
-                info.sourcePort = ntohs(tcpHeader->sourcePort);
-                info.destPort = ntohs(tcpHeader->destPort);
+                const TCPHeader* tcp = reinterpret_cast<const TCPHeader*>(packet + 14 + ipHeaderLength);
+                info.sourcePort = ntohs(tcp->sourcePort);
+                info.destPort = ntohs(tcp->destPort);
             }
-        }
-        else if (ipHeader->protocol == IPPROTO_UDP) {
+        } else if (ipHeader->protocol == IPPROTO_UDP) {
             if (header->len >= (size_t)(14 + ipHeaderLength + sizeof(UDPHeader))) {
-                const UDPHeader* udpHeader = reinterpret_cast<const UDPHeader*>(packet + 14 + ipHeaderLength);
-                info.sourcePort = ntohs(udpHeader->sourcePort);
-                info.destPort = ntohs(udpHeader->destPort);
+                const UDPHeader* udp = reinterpret_cast<const UDPHeader*>(packet + 14 + ipHeaderLength);
+                info.sourcePort = ntohs(udp->sourcePort);
+                info.destPort = ntohs(udp->destPort);
             }
         }
-        else {
-            info.sourcePort = 0;
-            info.destPort = 0;
-        }
 
-        // После определения портов и направления
-        info.processId = 0;
-        info.processName = "Unknown";
-
-        const std::string proto = info.protocol;
+        // PID и имя процесса
+        uint32_t pid = 0;
+        std::string pname = "Unknown";
         uint16_t localPort = (info.direction == PacketDirection::Outgoing) ? info.sourcePort : info.destPort;
-        GetProcessInfoByPortAndProto(localPort, proto, info.processId, info.processName);
+        GetProcessInfoByPortAndProto(localPort, info.protocol, pid, pname);
+        info.processId = pid;
+        info.processName = pname;
 
-        info.direction = DeterminePacketDirection(srcIP); // Используем srcIP вместо sourceIP
-
-        // Проверяем все поля перед вызовом callback
+        // Проверяем и очищаем
         if (info.sourceIp.empty()) info.sourceIp = "Unknown";
         if (info.destIp.empty()) info.destIp = "Unknown";
         if (info.protocol.empty()) info.protocol = "Unknown";
         if (info.processName.empty()) info.processName = "Unknown";
         if (info.time.empty()) info.time = "Unknown";
 
-        // Вызываем callback через PostMessage
+        char dbg[128];
+        sprintf_s(dbg, "DEBUG: processId = %u\n", info.processId);
+        OutputDebugStringA(dbg);
+
+        // Callback
+        packetCallback(info);
+
+        // Вызываем callback
         try {
             if (packetCallback) {
                 packetCallback(info);

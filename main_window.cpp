@@ -586,12 +586,13 @@ bool MainWindow::InitializeConnectionsList(int yPosition) {
         int width;
     } columns[] = {
         {L"Направление", 80},     // 0
-        {L"IP источника", 140},   // 1
-        {L"Порт источника", 80},  // 2
-        {L"IP назначения", 140},  // 3
-        {L"Порт назначения", 80}, // 4
+        {L"IP источника", 90},   // 1
+        {L"Порт источника", 60},  // 2
+        {L"IP назначения", 90},  // 3
+        {L"Порт назначения", 60}, // 4
         {L"Протокол", 80},        // 5
-        {L"Процесс", 150}         // 6
+		{L"PID процесса", 80}, // 6
+        {L"Процесс", 150}         // 7
     };
 
     for (int i = 0; i < _countof(columns); i++) {
@@ -618,21 +619,23 @@ void MainWindow::OnPacketReceived(const PacketInfo& info) {
 void MainWindow::UpdateGroupedPackets() {
     connectionsListView.Clear();
 
-    // Добавляем пустую строку для разделения
-    std::vector<std::wstring> emptyRow;
-    emptyRow.resize(5);
-    connectionsListView.AddItem(emptyRow);
+    // Добавляем пустую строку для разделения (можно удалить, если она не нужна)
+    // std::vector<std::wstring> emptyRow(7);
+    // connectionsListView.AddItem(emptyRow);
+
     for (const auto& pair : groupedPackets) {
         const auto& packet = pair.second;
         std::vector<std::wstring> items;
-        items.reserve(6);
+        items.reserve(7);
 
-        // Добавляем элементы в правильном порядке (без размера)
-        items.push_back(packet.direction == PacketDirection::Incoming ? L"Incoming" : L"Outgoing");
-        items.push_back(StringToWString(packet.sourceIp) + L":" + std::to_wstring(packet.sourcePort));
-        items.push_back(StringToWString(packet.destIp) + L":" + std::to_wstring(packet.destPort));
-        items.push_back(StringToWString(packet.protocol));
-        items.push_back(StringToWString(packet.processName));
+        items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий"); // 0
+        items.push_back(StringToWString(packet.sourceIp));                                           // 1
+        items.push_back(std::to_wstring(packet.sourcePort));                                         // 2
+        items.push_back(StringToWString(packet.destIp));                                             // 3
+        items.push_back(std::to_wstring(packet.destPort));                                           // 4
+        items.push_back(StringToWString(packet.protocol));                                           // 5
+		items.push_back(std::to_wstring(packet.processId)); 									     // 6
+        items.push_back(StringToWString(packet.processName));                                        // 7
 
         connectionsListView.AddItem(items);
     }
@@ -684,7 +687,8 @@ void MainWindow::AddPacketToList(const PacketInfo& info) {
     items.push_back(StringToWString(info.destIp));                                             // 3
     items.push_back(std::to_wstring(info.destPort));                                           // 4
     items.push_back(StringToWString(info.protocol));                                           // 5
-    items.push_back(StringToWString(info.processName));                                        // 6
+    items.push_back(std::to_wstring(info.processId)); 									   // 6
+    items.push_back(StringToWString(info.processName));                                        // 7
 
     // Отладочный вывод
     wchar_t debug[512];

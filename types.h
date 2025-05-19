@@ -145,10 +145,12 @@ struct PacketInfo {
     std::string time;
     size_t size;
     uint16_t sourcePort;
+    uint32_t  processId;
     uint16_t destPort;
     PacketDirection direction;
 
     PacketInfo() :
+        processId(0),
         size(0),
         sourcePort(0),
         destPort(0),
@@ -163,6 +165,7 @@ struct GroupedPacketInfo {
     std::string protocol;
     std::string processName;
     std::string time;
+    uint32_t processId;
     uint16_t sourcePort;
     uint16_t destPort;
     PacketDirection direction;
@@ -174,6 +177,12 @@ struct GroupedPacketInfo {
             protocol + "_" + processName + "_" +
             (direction == PacketDirection::Incoming ? "in" : "out");
     }
+    GroupedPacketInfo() : 
+        processId(0), 
+        sourcePort(0), 
+        destPort(0), 
+        direction(PacketDirection::Incoming) 
+    {}
 };
 
 namespace std {

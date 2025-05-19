@@ -3,6 +3,7 @@
 #include <commctrl.h>
 #include <windowsx.h>
 #include <ctime>
+#include <vector>
 #include <iomanip>
 #include <sstream>
 #include <mutex>
@@ -61,7 +62,15 @@ MainWindow::~MainWindow() {
     }
 }
 
-// Размещаем этот код в обработчике WM_TIMER или отдельном методе, который вызывается каждые 100-200 мс
+// Новый способ: только добавляем новые пакеты в ListView, не очищая его каждый раз.
+// Для хранения порядка последних N групп используем std::deque
+struct GroupedPacketView {
+    std::deque<std::string> order; // ключи (groupKey) в порядке добавления
+    std::map<std::string, GroupedPacketInfo> groups;
+};
+
+GroupedPacketView groupedPacketView;
+
 void MainWindow::ProcessPacketBatch() {
     std::vector<PacketInfo> toDisplay;
     {
@@ -72,10 +81,10 @@ void MainWindow::ProcessPacketBatch() {
         }
     }
     for (const auto& pkt : toDisplay) {
-        OnPacketCaptured(pkt); // твой метод отрисовки пакета в ListView
+        OnPacketCaptured(pkt); // твой метод группировки
     }
-    // После пачки — обнови ListView (например, UpdateGroupedPackets())
-    UpdateGroupedPackets();
+    // После пачки — обнови отображение БЕЗ очистки
+    UpdateGroupedPacketsIncremental();
 }
 
 bool MainWindow::Initialize(HINSTANCE hInstance) {
@@ -166,6 +175,58 @@ std::wstring MainWindow::FormatFileSize(size_t bytes) {
         return L"??? байт";
     }
 }
+
+// Новый метод: добавлять только новые элементы
+void MainWindow::UpdateGroupedPacketsIncremental() {
+    // Копируем новые элементы (последние MAX_DISPLAYED_PACKETS)
+    std::deque<std::string> newOrder;
+    std::map<std::string, GroupedPacketInfo> newGroups;
+    {
+        std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+        // Обновляем глобальную структуру для отображения
+        newGroups = groupedPackets;
+        // Собираем ключи в порядке появления (по времени добавления)
+        for (const auto& pair : groupedPackets) {
+            newOrder.push_back(pair.first);
+        }
+    }
+    // Удаляем из отображения старые элементы, если превышен лимит
+    while (newOrder.size() > MAX_DISPLAYED_PACKETS) {
+        std::string toRemove = newOrder.front();
+        newOrder.pop_front();
+        newGroups.erase(toRemove);
+        // Также удаляем из ListView
+        // connectionsListView.DeleteItem(0); // если реализовано
+    }
+    // Добавляем только отсутствующие в ListView элементы
+    // (здесь предполагается, что AddItem не дублирует уже существующие)
+    size_t count = connectionsListView.GetItemCount();
+    for (size_t i = count; i < newOrder.size(); ++i) {
+        const std::string& key = newOrder[i];
+        const GroupedPacketInfo& packet = newGroups.at(key);
+
+        std::vector<std::wstring> items;
+        items.reserve(8);
+
+        items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий");
+        items.push_back(StringToWString(packet.sourceIp));
+        items.push_back(std::to_wstring(packet.sourcePort));
+        items.push_back(StringToWString(packet.destIp));
+        items.push_back(std::to_wstring(packet.destPort));
+        items.push_back(StringToWString(packet.protocol));
+        items.push_back(std::to_wstring(packet.processId));
+        items.push_back(StringToWString(packet.processName));
+
+        connectionsListView.AddItem(items);
+    }
+    // Если превышено, удаляем лишние сверху (старые)
+    while (connectionsListView.GetItemCount() > MAX_DISPLAYED_PACKETS) {
+        connectionsListView.DeleteItem(0);
+    }
+    // Не трогаем прокрутку!
+    InvalidateRect(connectionsListView.GetHandle(), NULL, FALSE);
+}
+
 
 
 bool MainWindow::CreateMainWindow() {
@@ -684,8 +745,8 @@ bool MainWindow::InitializeConnectionsList(int yPosition) {
 
 
 
-#include <vector>
-// ...
+
+// Старый метод можно оставить для случаев полной перезагрузки списка
 void MainWindow::UpdateGroupedPackets() {
     connectionsListView.SetRedraw(false);
     connectionsListView.Clear();
@@ -727,7 +788,6 @@ void MainWindow::UpdateGroupedPackets() {
 
 void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
     try {
-
         GroupedPacketInfo groupInfo;
         groupInfo.sourceIp = packet.sourceIp;
         groupInfo.destIp = packet.destIp;
@@ -742,6 +802,17 @@ void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
 
         {
             std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+            // Только если такого ключа ещё не было, добавляем в порядок отображения
+            if (groupedPackets.find(key) == groupedPackets.end()) {
+                groupedPacketView.order.push_back(key);
+                // Если превышено, удаляем старый
+                if (groupedPacketView.order.size() > MAX_DISPLAYED_PACKETS) {
+                    std::string toRemove = groupedPacketView.order.front();
+                    groupedPacketView.order.pop_front();
+                    groupedPackets.erase(toRemove);
+                    // И удалить из ListView тоже можно здесь (если требуется)
+                }
+            }
             groupedPackets[key] = groupInfo; // всегда обновляем
             if (!selectedAdapterIp.empty()) {
                 adapterPackets[selectedAdapterIp] = groupedPackets;

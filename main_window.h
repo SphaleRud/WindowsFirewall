@@ -53,7 +53,7 @@ private:
     std::deque<PacketInfo> packetQueue;
     std::mutex packetMutex;
     static const size_t MAX_QUEUE_SIZE = 1000;
-    const size_t MAX_DISPLAYED_PACKETS = 5000;
+    
 
     // Помещаем новый пакет (вызывается из PacketInterceptor callback)
     void PushPacket(const PacketInfo& pkt) {
@@ -68,6 +68,8 @@ private:
 
     std::mutex groupedPacketsMutex;
     std::map<std::string, GroupedPacketInfo> groupedPackets;
+    void UpdateGroupedPacketsIncremental();
+    const size_t MAX_DISPLAYED_PACKETS = 5000;
     // Новый: map для каждого адаптера
     std::unordered_map<std::string, std::map<std::string, GroupedPacketInfo>> adapterPackets;
 

@@ -3,6 +3,7 @@
 #include <vector>
 #include <ctime>
 #include <Windows.h>
+#include <algorithm>
 
 #define SIO_RCVALL _WSAIOW(IOC_VENDOR,1)
 #define RCVALL_ON 1
@@ -170,19 +171,39 @@ struct GroupedPacketInfo {
     uint16_t destPort;
     PacketDirection direction;
 
-    // Ключ для группировки (убран размер)
+    // Ключ для группировки (теперь с processId, нормализованный processName)
     std::string GetKey() const {
-        return sourceIp + ":" + std::to_string(sourcePort) + "_" +
-            destIp + ":" + std::to_string(destPort) + "_" +
-            protocol + "_" + processName + "_" +
+        auto norm = [](const std::string& s) -> std::string {
+            std::string r = s;
+            // К нижнему регистру
+            std::transform(r.begin(), r.end(), r.begin(), ::tolower);
+            // Убираем пробелы по краям
+            auto first = r.find_first_not_of(" \t");
+            auto last = r.find_last_not_of(" \t");
+            if (first == std::string::npos || last == std::string::npos)
+                return "";
+            return r.substr(first, last - first + 1);
+            };
+
+        std::string pname = norm(processName);
+        std::string proto = norm(protocol);
+        std::string sip = norm(sourceIp);
+        std::string dip = norm(destIp);
+
+        return sip + ":" + std::to_string(sourcePort) + "_" +
+            dip + ":" + std::to_string(destPort) + "_" +
+            proto + "_" +
+            pname + "_" +
+            std::to_string(processId) + "_" +
             (direction == PacketDirection::Incoming ? "in" : "out");
     }
-    GroupedPacketInfo() : 
-        processId(0), 
-        sourcePort(0), 
-        destPort(0), 
-        direction(PacketDirection::Incoming) 
-    {}
+    GroupedPacketInfo() :
+        processId(0),
+        sourcePort(0),
+        destPort(0),
+        direction(PacketDirection::Incoming)
+    {
+    }
 };
 
 namespace std {

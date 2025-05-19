@@ -17,6 +17,8 @@
 #define IDD_ADAPTER_DIALOG      101
 #define IDC_ADAPTER_COMBO       1006
 //#define ID_SELECT_ADAPTER       1007
+#define ID_RULES_LIST 1006
+#define ID_CONNECTIONS_LIST 1007
 // Идентификаторы элементов главного окна
 #define IDC_ADAPTER_LABEL           1001
 #define IDC_SELECT_ADAPTER         1002

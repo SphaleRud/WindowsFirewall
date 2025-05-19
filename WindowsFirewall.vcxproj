@@ -135,17 +135,17 @@
     <ClInclude Include="listview.h" />
     <ClInclude Include="logger.h" />
     <ClInclude Include="main_window.h" />
-    <ClInclude Include="packetinterceptor.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="rule_manager.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="types.h" />
+    <ClInclude Include="wfpinterceptor.h" />
     <ClInclude Include="WindowsFirewall.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main_window.cpp" />
-    <ClCompile Include="packetinterceptor.cpp" />
     <ClCompile Include="rule_manager.cpp" />
+    <ClCompile Include="wfpinterceptor.cpp" />
     <ClCompile Include="WindowsFirewall.cpp" />
   </ItemGroup>
   <ItemGroup>

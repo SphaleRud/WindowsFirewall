@@ -11,18 +11,19 @@
 #include <string>
 #include <fstream>
 #include <deque>
+#include <set>
 
 #define WM_UPDATE_PACKET (WM_USER + 1)
 
 class MainWindow {
 public:
     enum ControlIds {
-        ID_START_CAPTURE = 1003,
-        ID_STOP_CAPTURE = 1004,
-        ID_ADD_RULE = 1005,
-        ID_DELETE_RULE = 1006,
-        ID_SAVE_PACKETS = 2001,
-        ID_CLEAR_SAVED_PACKETS = 2002
+        ID_START_CAPTURE = 1503,
+        ID_STOP_CAPTURE = 1504,
+        ID_ADD_RULE = 1505,
+        ID_DELETE_RULE = 1506,
+        ID_SAVE_PACKETS = 1501,
+        ID_CLEAR_SAVED_PACKETS = 1502
     };
 
     MainWindow();
@@ -69,6 +70,9 @@ private:
     std::mutex groupedPacketsMutex;
     std::map<std::string, GroupedPacketInfo> groupedPackets;
     void UpdateGroupedPacketsIncremental();
+    void UpdateGroupedPacketsNoDuplicates();
+    std::set<std::string> displayedKeys;
+
     const size_t MAX_DISPLAYED_PACKETS = 5000;
     // Новый: map для каждого адаптера
     std::unordered_map<std::string, std::map<std::string, GroupedPacketInfo>> adapterPackets;
@@ -96,11 +100,31 @@ private:
     void StartCapture();
     void StopCapture();
 
+    // Константы для меню
+    static const int CMD_PACKET_PROPERTIES = 2510;
+    static const int CMD_COPY_SOURCE_IP = 2511;
+    static const int CMD_COPY_DEST_IP = 2512;
+    static const int CMD_BLOCK_IP = 2513;
+    static const int CMD_WHOIS_IP = 2514;
+
+    // Вспомогательные методы
+    std::string GetPacketKeyFromListView(int index);
+    std::shared_ptr<GroupedPacketInfo> GetPacketInfo(const std::string& key);
+    void CopyTextToClipboard(const std::string& text);
+    void AddBlockingRule(const std::string& ip);
+    void ShowPacketProperties(int itemIndex);
+
+    // Обработчики
+    void OnContextMenu(HWND hwnd, int x, int y);
+    void OnPacketCommand(WPARAM wParam);
+    static INT_PTR CALLBACK PacketPropertiesDialogProc(HWND hwnd, UINT msg,
+        WPARAM wParam, LPARAM lParam);
+
     std::wstring GetAdapterDisplayName() const;
     void AddSystemMessage(const std::wstring& message);
     void ProcessPacket(const PacketInfo& info);
     bool AutoSelectAdapter();
-    void OnPacketCaptured(const PacketInfo& packet);
+    bool OnPacketCaptured(const PacketInfo& packet);
     void AddRule();
     void UpdateRulesList();
     void UpdateConnectionsList();

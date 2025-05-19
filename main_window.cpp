@@ -7,7 +7,9 @@
 #include <iomanip>
 #include <sstream>
 #include <mutex>
+#include <shellapi.h>
 
+#pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(linker,"\"/manifestdependency:type='win32' \
@@ -32,8 +34,11 @@ std::string TimeTToString(const time_t& time) {
     return oss.str();
 }
 
-std::string WStringToString(const std::wstring& wstr) {
-    if (wstr.empty()) return std::string();
+std::string MainWindow::WStringToString(const std::wstring& wstr) {
+    if (wstr.empty()) {
+        return std::string();
+    }
+
     int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
     std::string strTo(size_needed, 0);
     WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
@@ -80,11 +85,15 @@ void MainWindow::ProcessPacketBatch() {
             packetQueue.pop_front();
         }
     }
+
+    bool needUpdate = false;
     for (const auto& pkt : toDisplay) {
-        OnPacketCaptured(pkt); // твой метод группировки
+        needUpdate |= OnPacketCaptured(pkt);
     }
-    // После пачки — обнови отображение БЕЗ очистки
-    UpdateGroupedPacketsIncremental();
+
+    if (needUpdate) {
+        UpdateGroupedPacketsNoDuplicates();
+    }
 }
 
 bool MainWindow::Initialize(HINSTANCE hInstance) {
@@ -176,38 +185,41 @@ std::wstring MainWindow::FormatFileSize(size_t bytes) {
     }
 }
 
+
+
 // Новый метод: добавлять только новые элементы
 void MainWindow::UpdateGroupedPacketsIncremental() {
-    // Копируем новые элементы (последние MAX_DISPLAYED_PACKETS)
-    std::deque<std::string> newOrder;
-    std::map<std::string, GroupedPacketInfo> newGroups;
+    std::deque<std::string> orderCopy;
+    std::map<std::string, GroupedPacketInfo> groupsCopy;
     {
         std::lock_guard<std::mutex> lock(groupedPacketsMutex);
-        // Обновляем глобальную структуру для отображения
-        newGroups = groupedPackets;
-        // Собираем ключи в порядке появления (по времени добавления)
-        for (const auto& pair : groupedPackets) {
-            newOrder.push_back(pair.first);
-        }
+        orderCopy = groupedPacketView.order;
+        groupsCopy = groupedPackets;
     }
-    // Удаляем из отображения старые элементы, если превышен лимит
-    while (newOrder.size() > MAX_DISPLAYED_PACKETS) {
-        std::string toRemove = newOrder.front();
-        newOrder.pop_front();
-        newGroups.erase(toRemove);
-        // Также удаляем из ListView
-        // connectionsListView.DeleteItem(0); // если реализовано
-    }
-    // Добавляем только отсутствующие в ListView элементы
-    // (здесь предполагается, что AddItem не дублирует уже существующие)
-    size_t count = connectionsListView.GetItemCount();
-    for (size_t i = count; i < newOrder.size(); ++i) {
-        const std::string& key = newOrder[i];
-        const GroupedPacketInfo& packet = newGroups.at(key);
 
+    // Определяем сколько уже отрисовано строк
+    size_t listCount = connectionsListView.GetItemCount();
+    size_t total = orderCopy.size();
+    size_t start = (total > MAX_DISPLAYED_PACKETS) ? total - MAX_DISPLAYED_PACKETS : 0;
+
+    // Если полностью сбились с синхронизации — перерисовываем весь список
+    if (listCount > (total - start) + 10) {
+        // слишком много лишнего, делаем полный сброс
+        connectionsListView.SetRedraw(false);
+        connectionsListView.Clear();
+        listCount = 0;
+        connectionsListView.SetRedraw(true);
+    }
+
+    // Добавляем только новые строки (уникальные ключи)
+    for (size_t i = listCount + start; i < total; ++i) {
+        const std::string& key = orderCopy[i];
+        auto it = groupsCopy.find(key);
+        if (it == groupsCopy.end())
+            continue;
+        const auto& packet = it->second;
         std::vector<std::wstring> items;
         items.reserve(8);
-
         items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий");
         items.push_back(StringToWString(packet.sourceIp));
         items.push_back(std::to_wstring(packet.sourcePort));
@@ -216,16 +228,15 @@ void MainWindow::UpdateGroupedPacketsIncremental() {
         items.push_back(StringToWString(packet.protocol));
         items.push_back(std::to_wstring(packet.processId));
         items.push_back(StringToWString(packet.processName));
-
         connectionsListView.AddItem(items);
     }
-    // Если превышено, удаляем лишние сверху (старые)
+    // Лимитируем длину списка
     while (connectionsListView.GetItemCount() > MAX_DISPLAYED_PACKETS) {
         connectionsListView.DeleteItem(0);
     }
-    // Не трогаем прокрутку!
     InvalidateRect(connectionsListView.GetHandle(), NULL, FALSE);
 }
+
 
 
 
@@ -327,6 +338,77 @@ void MainWindow::LoadAdapterPackets(const std::string& adapter) {
     }
     fin.close();
     adapterPackets[adapter] = loaded;
+
+    // После загрузки сбрасываем порядок
+    {
+        std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+        groupedPacketView.order.clear();
+        for (const auto& pair : loaded) {
+            groupedPacketView.order.push_back(pair.first);
+        }
+    }
+}
+
+void MainWindow::UpdateGroupedPacketsNoDuplicates() {
+    // Сохраняем текущую позицию скролла
+    int topIndex = ListView_GetTopIndex(connectionsListView.GetHandle());
+
+    connectionsListView.SetRedraw(false);
+
+    std::deque<std::string> orderCopy;
+    std::map<std::string, GroupedPacketInfo> groupsCopy;
+    {
+        std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+        orderCopy = groupedPacketView.order;
+        groupsCopy = groupedPackets;
+    }
+
+    // Проверяем только новые ключи
+    std::set<std::string> newKeys;
+    for (const auto& key : orderCopy) {
+        if (displayedKeys.find(key) == displayedKeys.end()) {
+            newKeys.insert(key);
+        }
+    }
+
+    // Если есть новые ключи, обновляем весь список
+    if (!newKeys.empty()) {
+        connectionsListView.Clear();
+        displayedKeys.clear();
+
+        size_t total = orderCopy.size();
+        size_t start = (total > MAX_DISPLAYED_PACKETS) ? total - MAX_DISPLAYED_PACKETS : 0;
+
+        for (size_t i = start; i < total; ++i) {
+            const std::string& key = orderCopy[i];
+            auto it = groupsCopy.find(key);
+            if (it == groupsCopy.end())
+                continue;
+
+            const auto& packet = it->second;
+            std::vector<std::wstring> items;
+            items.reserve(8);
+            items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий");
+            items.push_back(StringToWString(packet.sourceIp));
+            items.push_back(std::to_wstring(packet.sourcePort));
+            items.push_back(StringToWString(packet.destIp));
+            items.push_back(std::to_wstring(packet.destPort));
+            items.push_back(StringToWString(packet.protocol));
+            items.push_back(std::to_wstring(packet.processId));
+            items.push_back(StringToWString(packet.processName));
+
+            connectionsListView.AddItem(items);
+            displayedKeys.insert(key);
+        }
+    }
+
+    connectionsListView.SetRedraw(true);
+
+    // Восстанавливаем позицию скролла
+    if (topIndex > 0) {
+        ListView_EnsureVisible(connectionsListView.GetHandle(), topIndex, FALSE);
+    }
+    InvalidateRect(connectionsListView.GetHandle(), NULL, FALSE);
 }
 
 void MainWindow::ClearSavedAdapterPackets(const std::string& adapter) {
@@ -786,7 +868,7 @@ void MainWindow::UpdateGroupedPackets() {
     InvalidateRect(connectionsListView.GetHandle(), NULL, TRUE);
 }
 
-void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
+bool MainWindow::OnPacketCaptured(const PacketInfo& packet) {
     try {
         GroupedPacketInfo groupInfo;
         groupInfo.sourceIp = packet.sourceIp;
@@ -799,30 +881,32 @@ void MainWindow::OnPacketCaptured(const PacketInfo& packet) {
         groupInfo.direction = packet.direction;
 
         std::string key = groupInfo.GetKey();
+        bool isNewPacket = false;
 
         {
             std::lock_guard<std::mutex> lock(groupedPacketsMutex);
-            // Только если такого ключа ещё не было, добавляем в порядок отображения
+            // Добавляем только если такого ключа ещё не было
             if (groupedPackets.find(key) == groupedPackets.end()) {
+                isNewPacket = true;
                 groupedPacketView.order.push_back(key);
-                // Если превышено, удаляем старый
                 if (groupedPacketView.order.size() > MAX_DISPLAYED_PACKETS) {
                     std::string toRemove = groupedPacketView.order.front();
                     groupedPacketView.order.pop_front();
                     groupedPackets.erase(toRemove);
-                    // И удалить из ListView тоже можно здесь (если требуется)
+                    displayedKeys.erase(toRemove);
                 }
             }
-            groupedPackets[key] = groupInfo; // всегда обновляем
+            groupedPackets[key] = groupInfo;
             if (!selectedAdapterIp.empty()) {
                 adapterPackets[selectedAdapterIp] = groupedPackets;
             }
         }
-        // Не вызывай UpdateGroupedPackets здесь!
-        OutputDebugStringA(("Captured packet with key: " + key + "\n").c_str());
+
+        return isNewPacket;
     }
     catch (const std::exception& e) {
         OutputDebugStringA(("OnPacketCaptured error: " + std::string(e.what()) + "\n").c_str());
+        return false;
     }
 }
 
@@ -877,8 +961,211 @@ void MainWindow::AddSystemMessage(const std::wstring& message) {
     }
 }
 
+std::string MainWindow::GetPacketKeyFromListView(int index) {
+    if (index < 0) {
+        OutputDebugStringA("Invalid index in GetPacketKeyFromListView\n");
+        return "";
+    }
+
+    wchar_t sourceIp[256] = { 0 };
+    wchar_t destIp[256] = { 0 };
+    wchar_t protocol[32] = { 0 };
+    wchar_t processName[256] = { 0 };
+    wchar_t direction[32] = { 0 };
+
+    ListView_GetItemText(connectionsListView.GetHandle(), index, 0, direction, 32);
+    ListView_GetItemText(connectionsListView.GetHandle(), index, 1, sourceIp, 256);
+    ListView_GetItemText(connectionsListView.GetHandle(), index, 3, destIp, 256);
+    ListView_GetItemText(connectionsListView.GetHandle(), index, 5, protocol, 32);
+    ListView_GetItemText(connectionsListView.GetHandle(), index, 7, processName, 256);
+
+    // Отладочный вывод
+    OutputDebugStringW(L"ListView data:\n");
+    OutputDebugStringW(L"Direction: "); OutputDebugStringW(direction); OutputDebugStringW(L"\n");
+    OutputDebugStringW(L"Source IP: "); OutputDebugStringW(sourceIp); OutputDebugStringW(L"\n");
+    OutputDebugStringW(L"Dest IP: "); OutputDebugStringW(destIp); OutputDebugStringW(L"\n");
+
+    GroupedPacketInfo tempInfo;
+    tempInfo.sourceIp = WStringToString(sourceIp);
+    tempInfo.destIp = WStringToString(destIp);
+    tempInfo.protocol = WStringToString(protocol);
+    tempInfo.processName = WStringToString(processName);
+    tempInfo.direction = (wcscmp(direction, L"Входящий") == 0) ?
+        PacketDirection::Incoming : PacketDirection::Outgoing;
+
+    wchar_t portStr[32];
+    ListView_GetItemText(connectionsListView.GetHandle(), index, 2, portStr, 32);
+    tempInfo.sourcePort = static_cast<uint16_t>(_wtoi(portStr));
+
+    ListView_GetItemText(connectionsListView.GetHandle(), index, 4, portStr, 32);
+    tempInfo.destPort = static_cast<uint16_t>(_wtoi(portStr));
+
+    wchar_t pidStr[32];
+    ListView_GetItemText(connectionsListView.GetHandle(), index, 6, pidStr, 32);
+    tempInfo.processId = static_cast<uint32_t>(_wtoi(pidStr));
+
+    std::string key = tempInfo.GetKey();
+    OutputDebugStringA(("Generated key: " + key + "\n").c_str());
+    return key;
+}
+
+std::shared_ptr<GroupedPacketInfo> MainWindow::GetPacketInfo(const std::string& key) {
+    std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+    auto it = groupedPackets.find(key);
+    if (it != groupedPackets.end()) {
+        return std::make_shared<GroupedPacketInfo>(it->second);
+    }
+    return nullptr;
+}
+
+void MainWindow::CopyTextToClipboard(const std::string& text) {
+    if (text.empty()) return;
+
+    if (OpenClipboard(hwnd)) {
+        EmptyClipboard();
+        size_t len = text.length() + 1;
+        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+        if (hMem) {
+            memcpy(GlobalLock(hMem), text.c_str(), len);
+            GlobalUnlock(hMem);
+            SetClipboardData(CF_TEXT, hMem);
+        }
+        CloseClipboard();
+    }
+}
+
+void MainWindow::AddBlockingRule(const std::string& ip) {
+    // TODO: Реализовать добавление правила блокировки
+    // Например, через Windows Firewall API
+    MessageBox(hwnd, StringToWString(
+        "Блокировка IP " + ip + " (требуется реализация)").c_str(),
+        L"Информация", MB_OK | MB_ICONINFORMATION);
+}
+
+void MainWindow::OnPacketCommand(WPARAM wParam) {
+    int selectedIndex = ListView_GetNextItem(connectionsListView.GetHandle(), -1, LVNI_SELECTED);
+    if (selectedIndex == -1)
+        return;
+
+    std::string key = GetPacketKeyFromListView(selectedIndex);
+    if (key.empty())
+        return;
+
+    auto packet = GetPacketInfo(key);
+    if (!packet)
+        return;
+
+    switch (LOWORD(wParam)) {
+    case CMD_PACKET_PROPERTIES: {
+        OutputDebugStringA("Opening properties dialog...\n");
+        DialogBoxParam(
+            GetModuleHandle(NULL),
+            MAKEINTRESOURCE(IDD_PACKET_PROPERTIES),
+            hwnd,
+            PacketPropertiesDialogProc,
+            reinterpret_cast<LPARAM>(packet.get())
+        );
+        break;
+    }
+
+    case CMD_COPY_SOURCE_IP: {
+        OutputDebugStringA(("Copying source IP: " + packet->sourceIp + "\n").c_str());
+        if (!packet->sourceIp.empty()) {
+            if (OpenClipboard(hwnd)) {
+                EmptyClipboard();
+                size_t len = packet->sourceIp.length() + 1;
+                HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+                if (hMem) {
+                    memcpy(GlobalLock(hMem), packet->sourceIp.c_str(), len);
+                    GlobalUnlock(hMem);
+                    SetClipboardData(CF_TEXT, hMem);
+                }
+                CloseClipboard();
+            }
+        }
+        break;
+    }
+
+    case CMD_COPY_DEST_IP: {
+        OutputDebugStringA(("Copying dest IP: " + packet->destIp + "\n").c_str());
+        if (!packet->destIp.empty()) {
+            if (OpenClipboard(hwnd)) {
+                EmptyClipboard();
+                size_t len = packet->destIp.length() + 1;
+                HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+                if (hMem) {
+                    memcpy(GlobalLock(hMem), packet->destIp.c_str(), len);
+                    GlobalUnlock(hMem);
+                    SetClipboardData(CF_TEXT, hMem);
+                }
+                CloseClipboard();
+            }
+        }
+        break;
+    }
+    case CMD_BLOCK_IP: {
+        std::wstring msg = L"Заблокировать IP " + StringToWString(packet->sourceIp) + L"?";
+        if (MessageBox(hwnd, msg.c_str(), L"Подтверждение", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+            AddBlockingRule(packet->sourceIp);
+        }
+        break;
+    }
+
+    case CMD_WHOIS_IP: {
+        std::wstring url = L"https://whois.domaintools.com/" + StringToWString(packet->sourceIp);
+        ShellExecute(NULL, L"open", url.c_str(), NULL, NULL, SW_SHOWNORMAL);
+        break;
+    }
+    }
+}
+
+void MainWindow::OnContextMenu(HWND hwnd, int x, int y) {
+    if (hwnd != connectionsListView.GetHandle())
+        return;
+
+    // Получаем выбранный индекс
+    int selectedIndex = ListView_GetNextItem(connectionsListView.GetHandle(), -1, LVNI_SELECTED);
+    if (selectedIndex == -1)
+        return;
+
+    POINT pt = { x, y };
+    if (x == -1 && y == -1) {
+        RECT rc;
+        ListView_GetItemRect(hwnd, selectedIndex, &rc, LVIR_BOUNDS);
+        pt.x = rc.left;
+        pt.y = rc.bottom;
+        ClientToScreen(hwnd, &pt);
+    }
+
+    HMENU hMenu = CreatePopupMenu();
+    AppendMenu(hMenu, MF_STRING, CMD_PACKET_PROPERTIES, L"Свойства");
+    AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenu(hMenu, MF_STRING, CMD_COPY_SOURCE_IP, L"Копировать IP источника");
+    AppendMenu(hMenu, MF_STRING, CMD_COPY_DEST_IP, L"Копировать IP назначения");
+    AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenu(hMenu, MF_STRING, CMD_BLOCK_IP, L"Заблокировать IP");
+    AppendMenu(hMenu, MF_STRING, CMD_WHOIS_IP, L"Whois для IP");
+
+    TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON,
+        pt.x, pt.y, 0, hwnd, NULL);
+    DestroyMenu(hMenu);
+}
+
+void MainWindow::ShowPacketProperties(int itemIndex) {
+    std::string key = GetPacketKeyFromListView(itemIndex);
+    if (key.empty()) return;
+
+    auto packet = GetPacketInfo(key);
+    if (!packet) return;
+
+    DialogBoxParam(hInstance,
+        MAKEINTRESOURCE(IDD_PACKET_PROPERTIES),
+        hwnd,
+        PacketPropertiesDialogProc,
+        reinterpret_cast<LPARAM>(&packet));
+}
+
 void MainWindow::OnAdapterSelected() {
-    // Сохраняем текущий список под старым ключом
     if (!selectedAdapterIp.empty()) {
         adapterPackets[selectedAdapterIp] = groupedPackets;
     }
@@ -901,8 +1188,17 @@ void MainWindow::OnAdapterSelected() {
             else {
                 groupedPackets.clear();
             }
-
-            UpdateGroupedPackets();
+            // Сбросить порядок после смены адаптера!
+            // После загрузки адаптера:
+            {
+                std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+                groupedPacketView.order.clear();
+                displayedKeys.clear(); // Очищаем отслеживание
+                for (const auto& pair : groupedPackets) {
+                    groupedPacketView.order.push_back(pair.first);
+                }
+            }
+            UpdateGroupedPacketsNoDuplicates();
             EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
         }
     }
@@ -956,10 +1252,19 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             }
             return 0;
         }
+        case WM_CONTEXTMENU: {
+            window->OnContextMenu((HWND)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        }
         case WM_COMMAND:
         {
             int wmId = LOWORD(wParam);
             int wmEvent = HIWORD(wParam);
+            if (LOWORD(wParam) >= CMD_PACKET_PROPERTIES &&
+                LOWORD(wParam) <= CMD_WHOIS_IP) {
+                window->OnPacketCommand(wParam);
+                return 0;
+            }
             switch (wmId) {
             case ID_SAVE_PACKETS:
                 if (wmEvent == BN_CLICKED) {
@@ -994,9 +1299,7 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
                 }
                 break;
             }
-
-            // Если не обработали команду, передаем дальше
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            break;
         }
         case WM_TIMER:
             if (wParam == 1) {
@@ -1023,7 +1326,61 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
+INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_INITDIALOG: {
+        // Получаем указатель на пакет из lParam
+        GroupedPacketInfo* packet = reinterpret_cast<GroupedPacketInfo*>(lParam);
+        if (!packet) return FALSE;
 
+        // Заполняем поля диалога
+        SetDlgItemText(hwnd, IDC_SOURCE,
+            (StringToWString(packet->sourceIp) + L":" +
+                std::to_wstring(packet->sourcePort)).c_str());
+
+        SetDlgItemText(hwnd, IDC_DEST,
+            (StringToWString(packet->destIp) + L":" +
+                std::to_wstring(packet->destPort)).c_str());
+
+        SetDlgItemText(hwnd, IDC_PROTOCOL,
+            StringToWString(packet->protocol).c_str());
+
+        SetDlgItemText(hwnd, IDC_PID,
+            std::to_wstring(packet->processId).c_str());
+
+        SetDlgItemText(hwnd, IDC_PROCESS_NAME,
+            StringToWString(packet->processName).c_str());
+
+        // Сохраняем указатель на пакет для использования в других обработчиках
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(packet));
+        return TRUE;
+    }
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDOK:
+        case IDCANCEL:
+            EndDialog(hwnd, LOWORD(wParam));
+            return TRUE;
+
+        /*case IDC_BLOCK_IP: {
+            auto packet = reinterpret_cast<GroupedPacketInfo*>(
+                GetWindowLongPtr(hwnd, GWLP_USERDATA));
+            if (packet) {
+                std::wstring msg = L"Заблокировать IP " +
+                    StringToWString(packet->sourceIp) + L"?";
+                if (MessageBox(hwnd, msg.c_str(), L"Подтверждение",
+                    MB_YESNO | MB_ICONQUESTION) == IDYES) {
+                    AddBlockingRule(packet->sourceIp);
+                }
+            }
+            return TRUE;
+        }*/
+        }
+        break;
+    }
+    return FALSE;
+}
 
 // Публичные методы
 void MainWindow::Show(int nCmdShow) {

@@ -85,20 +85,6 @@ struct icmp_header {
     unsigned short sequence;
 };
 
-// Структуры правил и соединений
-struct Rule {
-    int id;
-    std::string name;
-    std::string sourceIp;
-    std::string destIp;
-    uint16_t sourcePort;
-    uint16_t destPort;
-    Protocol protocol;
-    RuleAction action;
-    std::string appPath;
-    bool enabled;
-    std::string description;
-};
 
 struct Connection {
     std::string sourceIp;

@@ -6,6 +6,8 @@
 #include <string>
 #include <codecvt>
 #include <locale>
+#include "rule.h"
+#include "rule_wizard.h"
 
 RuleManager::RuleManager() = default;
 RuleManager::~RuleManager() = default;
@@ -75,7 +77,7 @@ bool RuleManager::IsAllowed(const Connection& connection, int& matchedRuleId) {
         }
     }
 
-    return true; // по умолчанию разрешено, если не найдено подходящих правил
+    return true; // Разрешить по умолчанию, если не найдено подходящее правило
 }
 
 void RuleManager::Clear() {
@@ -89,7 +91,7 @@ void RuleManager::ResetRuleIdCounter(int newNextId) {
     nextRuleId = newNextId;
 }
 
-// --- Диалог с правилами ---
+// --- Вспомогательные функции для строк ---
 inline std::wstring s2ws(const std::string& str) {
     if (str.empty()) return std::wstring();
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), nullptr, 0);
@@ -105,6 +107,8 @@ inline std::string ws2s(const std::wstring& wstr) {
     WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), &result[0], size_needed, nullptr, nullptr);
     return result;
 }
+
+// --- Диалог всех правил ---
 void RuleManager::ShowRulesDialog(HWND hParent) {
     DialogBoxParam(
         GetModuleHandle(nullptr),
@@ -147,20 +151,6 @@ static void FillRulesList(HWND hList) {
     }
 }
 
-static void AddRuleSimple() {
-    Rule rule;
-    rule.name = "New Rule";
-    rule.description = "Custom rule";
-    rule.protocol = Protocol::ANY;
-    rule.sourceIp = "";
-    rule.destIp = "";
-    rule.sourcePort = 0;
-    rule.destPort = 0;
-    rule.action = RuleAction::ALLOW;
-    rule.enabled = true;
-    RuleManager::Instance().AddRule(rule);
-}
-
 static void DeleteSelectedRule(HWND hList) {
     int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
     if (sel == -1) return;
@@ -171,136 +161,164 @@ static void DeleteSelectedRule(HWND hList) {
     }
 }
 
-// --- Диалог добавления правила ---
+// ---- Мастер добавления правила ----
+// Функция для переключения видимости групп параметров
+static void ShowParamGroups(HWND hwndDlg, int sel) {
+    // Сначала скрываем ВСЕ группы параметров
+    HWND hParamsGroup = GetDlgItem(hwndDlg, IDC_WIZARD_STEP_PARAMS);
+    if (hParamsGroup) {
+        ShowWindow(hParamsGroup, SW_SHOW);  // Показываем контейнер
+
+        // Скрываем все группы параметров
+        ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_APP), SW_HIDE);
+        ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_PORT), SW_HIDE);
+        ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_PROTO), SW_HIDE);
+        ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_ADVANCED), SW_HIDE);
+
+        // Показываем только нужную группу
+        switch (sel) {
+        case 0: // По приложению
+            ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_APP), SW_SHOW);
+            break;
+        case 1: // По порту
+            ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_PORT), SW_SHOW);
+            break;
+        case 2: // По протоколу
+            ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_PROTO), SW_SHOW);
+            break;
+        case 3: // Пользовательское
+            ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_ADVANCED), SW_SHOW);
+            break;
+        }
+    }
+}
+
 bool RuleManager::ShowAddRuleWizard(HWND hParent) {
-    Rule newRule;
-    INT_PTR res = DialogBoxParam(
-        GetModuleHandle(nullptr),
-        MAKEINTRESOURCE(IDD_RULE_WIZARD_DIALOG),
-        hParent,
-        RuleManager::FirewallRuleWizardProc,
-        reinterpret_cast<LPARAM>(&newRule)
-    );
-    if (res == IDOK) {
+    Rule newRule; // Создаем новое правило
+    if (RuleWizard::ShowWizard(hParent, newRule)) {
+        // Если пользователь нажал "Готово", добавляем правило
         AddRule(newRule);
         return true;
     }
     return false;
 }
 
-// Диалог мастера добавления правила
+static void ShowWizardStep(HWND hwndDlg, int step) {
+    // Сначала скрываем все шаги
+    ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_TYPE), SW_HIDE);
+    ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_PARAMS), SW_HIDE);
+    ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_ACTION), SW_HIDE);
+    ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_NAME), SW_HIDE);
+
+    // Показываем нужный шаг
+    switch (step) {
+    case 0: // Тип
+        ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_TYPE), SW_SHOW);
+        break;
+    case 1: // Параметры
+        ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_PARAMS), SW_SHOW);
+        break;
+    case 2: // Действие
+        ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_ACTION), SW_SHOW);
+        break;
+    case 3: // Имя/описание
+        ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_NAME), SW_SHOW);
+        break;
+    }
+}
+
+// Мастер добавления правила
+// Процедура диалога мастера создания правила
 INT_PTR CALLBACK RuleManager::FirewallRuleWizardProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     static Rule* rule = nullptr;
-    static int wizardStep = 0; // 0: тип, 1: параметры, 2: действие, 3: имя/описание
+    static int wizardStep = 0;
 
     switch (uMsg) {
     case WM_INITDIALOG: {
         rule = reinterpret_cast<Rule*>(lParam);
         wizardStep = 0;
 
-        // Скрываем все кроме первого шага
-        ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_TYPE), SW_SHOW);
-        ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_PARAMS), SW_HIDE);
-        ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_ACTION), SW_HIDE);
-        ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_NAME), SW_HIDE);
-
-        // Заполняем список типов
+        // Заполняем комбобоксы
         HWND typeCombo = GetDlgItem(hwndDlg, IDC_RULE_TYPE_COMBO);
         SendMessage(typeCombo, CB_ADDSTRING, 0, (LPARAM)L"По приложению");
         SendMessage(typeCombo, CB_ADDSTRING, 0, (LPARAM)L"По порту");
         SendMessage(typeCombo, CB_ADDSTRING, 0, (LPARAM)L"По протоколу");
-        SendMessage(typeCombo, CB_ADDSTRING, 0, (LPARAM)L"Пользовательское (расширенное)");
+        SendMessage(typeCombo, CB_ADDSTRING, 0, (LPARAM)L"Пользовательское");
         SendMessage(typeCombo, CB_SETCURSEL, 0, 0);
 
-        // Протоколы
-        HWND protoCombo = GetDlgItem(hwndDlg, IDC_PROTOCOL_COMBO);
-        SendMessage(protoCombo, CB_ADDSTRING, 0, (LPARAM)L"ANY");
-        SendMessage(protoCombo, CB_ADDSTRING, 0, (LPARAM)L"TCP");
-        SendMessage(protoCombo, CB_ADDSTRING, 0, (LPARAM)L"UDP");
-        SendMessage(protoCombo, CB_ADDSTRING, 0, (LPARAM)L"ICMP");
-        SendMessage(protoCombo, CB_SETCURSEL, 0, 0);
+        auto fillProtoCombo = [](HWND combo) {
+            SendMessage(combo, CB_ADDSTRING, 0, (LPARAM)L"ANY");
+            SendMessage(combo, CB_ADDSTRING, 0, (LPARAM)L"TCP");
+            SendMessage(combo, CB_ADDSTRING, 0, (LPARAM)L"UDP");
+            SendMessage(combo, CB_ADDSTRING, 0, (LPARAM)L"ICMP");
+            SendMessage(combo, CB_SETCURSEL, 0, 0);
+            };
 
-        // По умолчанию действие "разрешить"
+        fillProtoCombo(GetDlgItem(hwndDlg, IDC_PROTOCOL_COMBO));
+        fillProtoCombo(GetDlgItem(hwndDlg, IDC_ADV_PROTO_COMBO));
+
+        // По умолчанию "Разрешить"
         CheckRadioButton(hwndDlg, IDC_RULE_ALLOW_RADIO, IDC_RULE_BLOCK_RADIO, IDC_RULE_ALLOW_RADIO);
+
+        // Показываем первый шаг
+        ShowWizardStep(hwndDlg, wizardStep);
+        ShowParamGroups(hwndDlg, 0);
 
         return TRUE;
     }
+
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
+        case IDC_RULE_TYPE_COMBO:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                // При изменении типа правила
+                int sel = (int)SendMessage(GetDlgItem(hwndDlg, IDC_RULE_TYPE_COMBO),
+                    CB_GETCURSEL, 0, 0);
+                ShowParamGroups(hwndDlg, sel); // Обновляем видимость групп
+            }
+            break;
+
         case IDC_WIZARD_NEXT: {
-            if (wizardStep == 0) {
-                // Шаг 1: выбор типа
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_TYPE), SW_SHOW);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_PARAMS), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_ACTION), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_NAME), SW_HIDE);
-                wizardStep = 1;
+            if (wizardStep < 3) {
+                wizardStep++;
+                ShowWizardStep(hwndDlg, wizardStep);
 
-                // Определить выбранный тип
-                int sel = (int)SendMessage(GetDlgItem(hwndDlg, IDC_RULE_TYPE_COMBO), CB_GETCURSEL, 0, 0);
-
-                // Скрыть все группы полей
-                ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_APP), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_PORT), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_PROTO), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_ADVANCED), SW_HIDE);
-
-                if (sel == 0) // По приложению
-                    ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_APP), SW_SHOW);
-                else if (sel == 1) // По порту
-                    ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_PORT), SW_SHOW);
-                else if (sel == 2) // По протоколу
-                    ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_PROTO), SW_SHOW);
-                else if (sel == 3) // Пользовательское
-                    ShowWindow(GetDlgItem(hwndDlg, IDC_RULE_PARAM_ADVANCED), SW_SHOW);
-
+                // Если перешли на шаг параметров, показываем нужную группу
+                if (wizardStep == 1) {
+                    int sel = (int)SendMessage(GetDlgItem(hwndDlg, IDC_RULE_TYPE_COMBO), CB_GETCURSEL, 0, 0);
+                    ShowParamGroups(hwndDlg, sel);
+                }
             }
-            else if (wizardStep == 1) {
-                // Шаг 2: действие
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_TYPE), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_PARAMS), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_ACTION), SW_SHOW);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_NAME), SW_HIDE);
-                wizardStep = 2;
-
-            }
-            else if (wizardStep == 2) {
-                // Шаг 3: имя/описание
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_TYPE), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_PARAMS), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_ACTION), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_NAME), SW_SHOW);
-                wizardStep = 3;
-
-            }
-            else if (wizardStep == 3) {
-                // Завершение — сбор всех данных
+            else {
+                // Завершение мастера - сбор данных
                 int ruleType = (int)SendMessage(GetDlgItem(hwndDlg, IDC_RULE_TYPE_COMBO), CB_GETCURSEL, 0, 0);
-
                 wchar_t buf[256];
+                int port = 0;
+                int protoSel = 0;
 
-                if (ruleType == 0) {
-                    // По приложению
+                // Заполняем правило в зависимости от типа
+                switch (ruleType) {
+                case 0: // По приложению
                     GetDlgItemText(hwndDlg, IDC_APP_PATH_EDIT, buf, 255);
                     rule->appPath = ws2s(buf);
                     rule->protocol = Protocol::ANY;
                     rule->sourcePort = rule->destPort = 0;
                     rule->sourceIp = "";
                     rule->destIp = "";
-                }
-                else if (ruleType == 1) {
-                    // По порту
+                    break;
+
+                case 1: // По порту
                     GetDlgItemText(hwndDlg, IDC_PORT_EDIT, buf, 255);
-                    int port = _wtoi(buf);
+                    port = _wtoi(buf);
                     rule->sourcePort = rule->destPort = port;
                     rule->appPath = "";
                     rule->protocol = Protocol::ANY;
                     rule->sourceIp = "";
                     rule->destIp = "";
-                }
-                else if (ruleType == 2) {
-                    // По протоколу
-                    int protoSel = (int)SendMessage(GetDlgItem(hwndDlg, IDC_PROTOCOL_COMBO), CB_GETCURSEL, 0, 0);
+                    break;
+
+                case 2: // По протоколу
+                    protoSel = (int)SendMessage(GetDlgItem(hwndDlg, IDC_PROTOCOL_COMBO), CB_GETCURSEL, 0, 0);
                     rule->protocol = (protoSel == 1) ? Protocol::TCP :
                         (protoSel == 2) ? Protocol::UDP :
                         (protoSel == 3) ? Protocol::ICMP : Protocol::ANY;
@@ -308,11 +326,11 @@ INT_PTR CALLBACK RuleManager::FirewallRuleWizardProc(HWND hwndDlg, UINT uMsg, WP
                     rule->appPath = "";
                     rule->sourceIp = "";
                     rule->destIp = "";
-                }
-                else if (ruleType == 3) {
-                    // Пользовательское
-                    // Протокол:
-                    int protoSel = (int)SendMessage(GetDlgItem(hwndDlg, IDC_ADV_PROTO_COMBO), CB_GETCURSEL, 0, 0);
+                    break;
+
+                case 3: // Пользовательское
+                    // Протокол
+                    protoSel = (int)SendMessage(GetDlgItem(hwndDlg, IDC_ADV_PROTO_COMBO), CB_GETCURSEL, 0, 0);
                     rule->protocol = (protoSel == 1) ? Protocol::TCP :
                         (protoSel == 2) ? Protocol::UDP :
                         (protoSel == 3) ? Protocol::ICMP : Protocol::ANY;
@@ -332,47 +350,46 @@ INT_PTR CALLBACK RuleManager::FirewallRuleWizardProc(HWND hwndDlg, UINT uMsg, WP
                     // Приложение
                     GetDlgItemText(hwndDlg, IDC_ADV_APP_PATH_EDIT, buf, 255);
                     rule->appPath = ws2s(buf);
+                    break;
                 }
 
-                // Действие
+                // Общие параметры для всех типов
                 rule->action = IsDlgButtonChecked(hwndDlg, IDC_RULE_ALLOW_RADIO) == BST_CHECKED
                     ? RuleAction::ALLOW : RuleAction::BLOCK;
                 rule->enabled = true;
 
-                // Имя и описание
                 GetDlgItemText(hwndDlg, IDC_RULE_NAME_EDIT, buf, 255);
                 rule->name = ws2s(buf);
                 GetDlgItemText(hwndDlg, IDC_RULE_DESC_EDIT, buf, 255);
                 rule->description = ws2s(buf);
 
                 EndDialog(hwndDlg, IDOK);
-                return TRUE;
             }
             return TRUE;
         }
+
         case IDC_WIZARD_BACK: {
-            if (wizardStep == 1) {
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_PARAMS), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_TYPE), SW_SHOW);
-                wizardStep = 0;
-            }
-            else if (wizardStep == 2) {
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_ACTION), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_PARAMS), SW_SHOW);
-                wizardStep = 1;
-            }
-            else if (wizardStep == 3) {
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_NAME), SW_HIDE);
-                ShowWindow(GetDlgItem(hwndDlg, IDC_WIZARD_STEP_ACTION), SW_SHOW);
-                wizardStep = 2;
+            if (wizardStep > 0) {
+                wizardStep--;
+                ShowWizardStep(hwndDlg, wizardStep);
+
+                // Если вернулись на шаг параметров, показываем нужную группу
+                if (wizardStep == 1) {
+                    int sel = (int)SendMessage(GetDlgItem(hwndDlg, IDC_RULE_TYPE_COMBO), CB_GETCURSEL, 0, 0);
+                    ShowParamGroups(hwndDlg, sel);
+                }
             }
             return TRUE;
         }
+
         case IDC_BROWSE_APP:
         case IDC_ADV_BROWSE_APP: {
-            int editId = (LOWORD(wParam) == IDC_BROWSE_APP) ? IDC_APP_PATH_EDIT : IDC_ADV_APP_PATH_EDIT;
+            int editId = (LOWORD(wParam) == IDC_BROWSE_APP) ?
+                IDC_APP_PATH_EDIT : IDC_ADV_APP_PATH_EDIT;
+
             IFileOpenDialog* pFileOpen = nullptr;
-            HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL, IID_IFileOpenDialog, (void**)&pFileOpen);
+            HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
+                IID_IFileOpenDialog, (void**)&pFileOpen);
             if (SUCCEEDED(hr)) {
                 hr = pFileOpen->Show(hwndDlg);
                 if (SUCCEEDED(hr)) {
@@ -392,6 +409,7 @@ INT_PTR CALLBACK RuleManager::FirewallRuleWizardProc(HWND hwndDlg, UINT uMsg, WP
             }
             return TRUE;
         }
+
         case IDCANCEL:
             EndDialog(hwndDlg, IDCANCEL);
             return TRUE;
@@ -401,6 +419,9 @@ INT_PTR CALLBACK RuleManager::FirewallRuleWizardProc(HWND hwndDlg, UINT uMsg, WP
     return FALSE;
 }
 
+// Остальные методы класса RuleManager (AddRule, RemoveRule и т.д.) остаются без изменений
+
+// --- Диалог списка правил ---
 INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     static HWND hList = nullptr;
     switch (uMsg) {
@@ -435,7 +456,6 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
         case IDCANCEL:
             EndDialog(hwndDlg, LOWORD(wParam));
             return TRUE;
-
         }
         break;
     }

@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include "types.h"
 
 enum class Protocol {
     ANY,
@@ -22,10 +23,11 @@ public:
         , destPort(0)
         , action(RuleAction::ALLOW)
         , enabled(true)
+        , direction(RuleDirection::Inbound)  // Используем RuleDirection из types.h
     {
     }
 
-    // Конструктор копирования
+    // Обновляем конструктор копирования
     Rule(const Rule& other)
         : id(other.id)
         , name(other.name)
@@ -38,10 +40,11 @@ public:
         , appPath(other.appPath)
         , action(other.action)
         , enabled(other.enabled)
+        , direction(other.direction)
     {
     }
 
-    // Оператор присваивания
+    // Обновляем оператор присваивания
     Rule& operator=(const Rule& other) {
         if (this != &other) {
             id = other.id;
@@ -55,11 +58,11 @@ public:
             appPath = other.appPath;
             action = other.action;
             enabled = other.enabled;
+            direction = other.direction;
         }
         return *this;
     }
 
-    // Данные правила
     int id;
     std::string name;
     std::string description;
@@ -71,4 +74,5 @@ public:
     std::string appPath;
     RuleAction action;
     bool enabled;
+    RuleDirection direction;  // Используем RuleDirection из types.h
 };

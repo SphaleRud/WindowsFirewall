@@ -1,5 +1,6 @@
 #pragma once
-#include "types.h"
+#include "rule.h"
+#include "rule_manager.h"
 #include <Windows.h>
 #include <memory>
 

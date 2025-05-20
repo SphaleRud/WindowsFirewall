@@ -89,6 +89,8 @@
 #define IDD_RULE_PAGE_ACTION	        4042
 #define IDD_RULE_PAGE_NAME		        4043
 #define IDC_WIZARD_CONTAINER	        4044
+#define IDC_RADIO_INBOUND				4045
+#define IDC_RADIO_OUTBOUND				4046
 
 #define IDI_ICON_PLAY					5001
 #define IDI_ICON_STOP					5002

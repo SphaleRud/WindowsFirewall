@@ -141,8 +141,10 @@
     <ClInclude Include="rule.h" />
     <ClInclude Include="rule_manager.h" />
     <ClInclude Include="rule_wizard.h" />
+    <ClInclude Include="string_utils.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="types.h" />
+    <ClInclude Include="validator.h" />
     <ClInclude Include="WindowsFirewall.h" />
   </ItemGroup>
   <ItemGroup>
@@ -150,6 +152,7 @@
     <ClCompile Include="packetinterceptor.cpp" />
     <ClCompile Include="rule_manager.cpp" />
     <ClCompile Include="rule_wizard.cpp" />
+    <ClCompile Include="validator.cpp" />
     <ClCompile Include="WindowsFirewall.cpp" />
   </ItemGroup>
   <ItemGroup>

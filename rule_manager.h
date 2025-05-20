@@ -3,6 +3,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include "rule.h"
 #include "types.h"
 #include <Windows.h>
 
@@ -14,10 +15,7 @@ private:
     std::vector<Rule> rules;
     mutable std::mutex ruleMutex;
     int nextRuleId = 1;
-
-    // Новый диалог добавления правила
-    static INT_PTR CALLBACK FirewallRuleWizardProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
-    bool ShowAddRuleWizard(HWND hParent);
+    RuleDirection currentDirection = RuleDirection::Inbound;
 
 public:
     RuleManager(const RuleManager&) = delete;
@@ -25,6 +23,17 @@ public:
 
     static RuleManager& Instance();
 
+    void SetDirection(RuleDirection direction) {
+        std::lock_guard<std::mutex> lock(ruleMutex);
+        currentDirection = direction;
+    }
+
+    RuleDirection GetCurrentDirection() const {
+        std::lock_guard<std::mutex> lock(ruleMutex);
+        return currentDirection;
+    }
+
+    bool ShowAddRuleWizard(HWND hParent);
     bool AddRule(const Rule& rule);
     bool RemoveRule(int ruleId);
     bool UpdateRule(const Rule& rule);
@@ -33,15 +42,8 @@ public:
     bool IsAllowed(const Connection& connection, int& matchedRuleId);
     void Clear();
     void ResetRuleIdCounter(int newNextId = 1);
-
-    // Показать окно с правилами
     void ShowRulesDialog(HWND hParent);
 
 private:
-    // Обработчик окна
     static INT_PTR CALLBACK RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 };
-
-    // (Опционально) Импорт/экспорт (реализация позже)
-    // bool LoadRulesFromFile(const std::string& filename);
-    // bool SaveRulesToFile(const std::string& filename);

@@ -4,22 +4,10 @@
 #include <ctime>
 #include <Windows.h>
 #include <algorithm>
+#include "rule.h"
 
 #define SIO_RCVALL _WSAIOW(IOC_VENDOR,1)
 #define RCVALL_ON 1
-
-// Базовые перечисления
-enum class RuleAction {
-    ALLOW,
-    BLOCK
-};
-
-enum class Protocol {
-    TCP,
-    UDP,
-    ICMP,
-    ANY
-};
 
 enum class ProtocolFilter
 {
@@ -28,6 +16,13 @@ enum class ProtocolFilter
     TCP,
     UDP
 };
+
+// Добавляем enum для направления правил
+enum class RuleDirection {
+    Inbound,
+    Outbound
+};
+
 
 struct AppSettings
 {
@@ -86,14 +81,37 @@ struct icmp_header {
 };
 
 
+// Структура для хранения информации о соединении
 struct Connection {
+    Protocol protocol;  // Теперь Protocol определен из rule.h
     std::string sourceIp;
     std::string destIp;
-    uint16_t sourcePort;
-    uint16_t destPort;
-    Protocol protocol;
-    time_t timestamp;
+    int sourcePort;
+    int destPort;
+    std::string appPath;
+
+    Connection()
+        : protocol(Protocol::ANY)
+        , sourcePort(0)
+        , destPort(0)
+    {
+    }
 };
+
+// Структура конфигурации
+struct Configuration {
+    bool enabled;
+    bool logEnabled;
+    std::string logPath;
+
+    Configuration()
+        : enabled(true)
+        , logEnabled(false)
+        , logPath("")
+    {
+    }
+};
+
 struct ConnectionKey {
     std::string sourceIp;
     std::string destIp;

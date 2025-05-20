@@ -2,7 +2,9 @@
 #include "resource.h"
 #include <shobjidl.h>
 #include <CommCtrl.h>
-#include "rule.h"
+#include "string_utils.h" 
+#include <vector>
+#include "validator.h"
 
 RuleWizard* RuleWizard::s_instance = nullptr;
 
@@ -20,29 +22,6 @@ RuleWizard::RuleWizard(HWND hParent, Rule& rule)
 RuleWizard::~RuleWizard()
 {
     s_instance = nullptr;
-}
-
-// Добавьте эти вспомогательные функции в начало файла
-inline std::string WideToUtf8(const wchar_t* str) {
-    if (!str) return std::string();
-
-    int size_needed = WideCharToMultiByte(CP_UTF8, 0, str, -1, nullptr, 0, nullptr, nullptr);
-    if (size_needed <= 0) return std::string();
-
-    std::string result(size_needed - 1, 0); // -1 потому что size_needed включает завершающий нуль
-    WideCharToMultiByte(CP_UTF8, 0, str, -1, &result[0], size_needed, nullptr, nullptr);
-    return result;
-}
-
-inline std::wstring Utf8ToWide(const std::string& str) {
-    if (str.empty()) return std::wstring();
-
-    int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), nullptr, 0);
-    if (size_needed <= 0) return std::wstring();
-
-    std::wstring result(size_needed, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), &result[0], size_needed);
-    return result;
 }
 
 bool RuleWizard::ShowWizard(HWND hParent, Rule& rule)
@@ -135,6 +114,210 @@ void RuleWizard::ShowPage(WizardPage page)
     UpdateButtons();
 }
 
+bool RuleWizard::ValidateCurrentPage()
+{
+    if (!SavePageData())
+        return false;
+
+    switch (m_currentPage) {
+    case PAGE_TYPE: {
+        // Проверяем, что тип правила выбран
+        if (m_selectedType < 0 || m_selectedType > 3) {
+            MessageBox(m_hwndCurrent,
+                L"Пожалуйста, выберите тип правила.",
+                L"Проверка данных", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        return true;
+    }
+
+    case PAGE_PARAMS_APP: {
+        // Проверяем путь к приложению
+        wchar_t buf[MAX_PATH];
+        GetDlgItemText(m_hwndCurrent, IDC_APP_PATH_EDIT, buf, MAX_PATH);
+        if (wcslen(buf) == 0) {
+            MessageBox(m_hwndCurrent,
+                L"Пожалуйста, укажите путь к приложению.",
+                L"Проверка данных", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        // Проверяем существование файла
+        if (GetFileAttributes(buf) == INVALID_FILE_ATTRIBUTES) {
+            MessageBox(m_hwndCurrent,
+                L"Указанный файл не существует.\nПожалуйста, проверьте путь к приложению.",
+                L"Проверка данных", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        return true;
+    }
+
+    case PAGE_PARAMS_PORT: {
+        wchar_t buf[256];
+        GetDlgItemText(m_hwndCurrent, IDC_PORT_EDIT, buf, 255);
+        if (wcslen(buf) == 0) {
+            MessageBox(m_hwndCurrent,
+                L"Пожалуйста, укажите порт или диапазон портов.",
+                L"Проверка данных", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+
+        std::vector<std::pair<int, int>> portRanges;
+        if (!RuleValidator::ValidatePortInput(buf, portRanges)) {
+            MessageBox(m_hwndCurrent,
+                L"Неверный формат порта. Используйте:\n\n"
+                L"• Одиночный порт: 80\n"
+                L"• Диапазон портов: 1000-2000\n"
+                L"• Список портов: 80,443,3389\n\n"
+                L"Допустимые значения: 1-65535",
+                L"Проверка данных", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        return true;
+    }
+
+    case PAGE_PARAMS_PROTO: {
+        // Проверяем, что протокол выбран
+        int protoSel = SendDlgItemMessage(m_hwndCurrent, IDC_PROTOCOL_COMBO, CB_GETCURSEL, 0, 0);
+        if (protoSel == CB_ERR) {
+            MessageBox(m_hwndCurrent,
+                L"Пожалуйста, выберите протокол.",
+                L"Проверка данных", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        return true;
+    }
+
+    case PAGE_PARAMS_ADVANCED: {
+        wchar_t buf[256];
+        bool hasAtLeastOne = false;
+
+        // Проверка протокола
+        int protoSel = SendDlgItemMessage(m_hwndCurrent, IDC_ADV_PROTO_COMBO, CB_GETCURSEL, 0, 0);
+        if (protoSel == CB_ERR) {
+            MessageBox(m_hwndCurrent,
+                L"Пожалуйста, выберите протокол.",
+                L"Проверка данных", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+
+        // Проверка IP адреса источника
+        GetDlgItemText(m_hwndCurrent, IDC_ADV_SRC_IP_EDIT, buf, 255);
+        if (buf[0] != '\0') {
+            std::vector<std::pair<std::string, std::string>> ipRanges;
+            if (!RuleValidator::ValidateIpInput(buf, ipRanges)) {
+                MessageBox(m_hwndCurrent,
+                    L"Неверный формат IP адреса источника. Используйте:\n\n"
+                    L"• Одиночный IP: 192.168.1.1\n"
+                    L"• Диапазон IP: 192.168.1.1-192.168.1.10\n"
+                    L"• Подсеть: 192.168.1.0/24\n"
+                    L"• Список IP: 192.168.1.1,192.168.1.2",
+                    L"Проверка данных", MB_OK | MB_ICONWARNING);
+                return false;
+            }
+            hasAtLeastOne = true;
+        }
+
+        // Проверка порта источника
+        GetDlgItemText(m_hwndCurrent, IDC_ADV_SRC_PORT_EDIT, buf, 255);
+        if (buf[0] != '\0') {
+            std::vector<std::pair<int, int>> portRanges;
+            if (!RuleValidator::ValidatePortInput(buf, portRanges)) {
+                MessageBox(m_hwndCurrent,
+                    L"Неверный формат порта источника. Используйте:\n\n"
+                    L"• Одиночный порт: 80\n"
+                    L"• Диапазон портов: 1000-2000\n"
+                    L"• Список портов: 80,443,3389\n\n"
+                    L"Допустимые значения: 1-65535",
+                    L"Проверка данных", MB_OK | MB_ICONWARNING);
+                return false;
+            }
+            hasAtLeastOne = true;
+        }
+
+        // Проверка IP адреса назначения
+        GetDlgItemText(m_hwndCurrent, IDC_ADV_DST_IP_EDIT, buf, 255);
+        if (buf[0] != '\0') {
+            std::vector<std::pair<std::string, std::string>> ipRanges;
+            if (!RuleValidator::ValidateIpInput(buf, ipRanges)) {
+                MessageBox(m_hwndCurrent,
+                    L"Неверный формат IP адреса назначения. Используйте:\n\n"
+                    L"• Одиночный IP: 192.168.1.1\n"
+                    L"• Диапазон IP: 192.168.1.1-192.168.1.10\n"
+                    L"• Подсеть: 192.168.1.0/24\n"
+                    L"• Список IP: 192.168.1.1,192.168.1.2",
+                    L"Проверка данных", MB_OK | MB_ICONWARNING);
+                return false;
+            }
+            hasAtLeastOne = true;
+        }
+
+        // Проверка порта назначения
+        GetDlgItemText(m_hwndCurrent, IDC_ADV_DST_PORT_EDIT, buf, 255);
+        if (buf[0] != '\0') {
+            std::vector<std::pair<int, int>> portRanges;
+            if (!RuleValidator::ValidatePortInput(buf, portRanges)) {
+                MessageBox(m_hwndCurrent,
+                    L"Неверный формат порта назначения. Используйте:\n\n"
+                    L"• Одиночный порт: 80\n"
+                    L"• Диапазон портов: 1000-2000\n"
+                    L"• Список портов: 80,443,3389\n\n"
+                    L"Допустимые значения: 1-65535",
+                    L"Проверка данных", MB_OK | MB_ICONWARNING);
+                return false;
+            }
+            hasAtLeastOne = true;
+        }
+
+        // Проверка пути к приложению
+        GetDlgItemText(m_hwndCurrent, IDC_ADV_APP_PATH_EDIT, buf, MAX_PATH);
+        if (buf[0] != '\0') {
+            if (GetFileAttributes(buf) == INVALID_FILE_ATTRIBUTES) {
+                MessageBox(m_hwndCurrent,
+                    L"Указанный файл не существует.\nПожалуйста, проверьте путь к приложению.",
+                    L"Проверка данных", MB_OK | MB_ICONWARNING);
+                return false;
+            }
+            hasAtLeastOne = true;
+        }
+
+        // Проверяем, что хотя бы одно поле заполнено
+        if (!hasAtLeastOne) {
+            MessageBox(m_hwndCurrent,
+                L"Пожалуйста, заполните хотя бы одно поле:\n\n"
+                L"• IP адрес источника или назначения\n"
+                L"• Порт источника или назначения\n"
+                L"• Путь к приложению",
+                L"Проверка данных", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        return true;
+    }
+
+    case PAGE_ACTION: {
+        // Проверка не требуется, так как всегда выбран один из вариантов
+        return true;
+    }
+
+    case PAGE_NAME: {
+        wchar_t buf[256];
+
+        // Проверяем имя правила
+        GetDlgItemText(m_hwndCurrent, IDC_RULE_NAME_EDIT, buf, 255);
+        if (wcslen(buf) == 0) {
+            MessageBox(m_hwndCurrent,
+                L"Пожалуйста, введите имя правила.",
+                L"Проверка данных", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+
+        // Описание может быть пустым
+        return true;
+    }
+    }
+
+    return true;
+}
+
 void RuleWizard::UpdateButtons()
 {
     EnableWindow(GetDlgItem(m_hwndMain, IDC_WIZARD_BACK), m_currentPage > PAGE_TYPE);
@@ -200,27 +383,6 @@ bool RuleWizard::SavePageData()
         m_rule.name = WideToUtf8(buf);
         GetDlgItemText(m_hwndCurrent, IDC_RULE_DESC_EDIT, buf, 255);
         m_rule.description = WideToUtf8(buf);
-        return !m_rule.name.empty();
-    }
-    return true;
-}
-
-bool RuleWizard::ValidateCurrentPage()
-{
-    if (!SavePageData())
-        return false;
-
-    switch (m_currentPage) {
-    case PAGE_TYPE:
-        return m_selectedType >= 0 && m_selectedType < 4;
-
-    case PAGE_PARAMS_APP:
-        return !m_rule.appPath.empty();
-
-    case PAGE_PARAMS_PORT:
-        return m_rule.destPort > 0 && m_rule.destPort <= 65535;
-
-    case PAGE_NAME:
         return !m_rule.name.empty();
     }
     return true;

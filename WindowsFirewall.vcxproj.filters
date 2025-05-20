@@ -45,9 +45,6 @@
     <ClInclude Include="WindowsFirewall.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="types.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="packetinterceptor.h">
       <Filter>Header Files\Core</Filter>
     </ClInclude>
@@ -69,6 +66,15 @@
     <ClInclude Include="rule.h">
       <Filter>Header Files\Utils</Filter>
     </ClInclude>
+    <ClInclude Include="string_utils.h">
+      <Filter>Header Files\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="types.h">
+      <Filter>Header Files\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="validator.h">
+      <Filter>Header Files\Utils</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="WindowsFirewall.cpp">
@@ -85,6 +91,9 @@
     </ClCompile>
     <ClCompile Include="rule_wizard.cpp">
       <Filter>Source Files\GUI</Filter>
+    </ClCompile>
+    <ClCompile Include="validator.cpp">
+      <Filter>Source Files\Utils</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -442,7 +442,7 @@ bool PacketInterceptor::StartCapture(const std::string& adapterIp) {
     // Компилируем и устанавливаем фильтр
     struct bpf_program fcode;
     // Расширяем фильтр для захвата всех интересующих протоколов
-    const char* filter = "tcp or udp";
+    const char* filter = "ip";
     if (pcap_compile(handle, &fcode, filter, 1, PCAP_NETMASK_UNKNOWN) < 0) {
         std::string error = "Failed to compile filter: " + std::string(pcap_geterr(handle));
         OutputDebugStringA(error.c_str());

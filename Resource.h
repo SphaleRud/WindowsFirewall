@@ -38,6 +38,13 @@
 #define IDI_ICON_PLAY					5001
 #define IDI_ICON_STOP					5002
 #define IDI_ICON_SETTINGS				5003
+#define IDD_SETTINGS_DIALOG				6001
+#define IDC_SAVE_SETTINGS				6002
+#define IDC_RADIO_ALL					6101
+#define IDC_RADIO_TCP					6102
+#define IDC_RADIO_UDP					6103
+#define IDC_RADIO_TCP_UDP				6104
+#define IDC_RADIO_ALL					6105
 #define IDC_STATIC                      -1
 
 // Next default values for new objects

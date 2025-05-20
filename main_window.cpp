@@ -478,23 +478,24 @@ void MainWindow::LoadAdapterPackets(const std::string& adapter) {
         std::getline(ss, pkt.processName, ',');
 
         std::string temp;
-        std::getline(ss, temp, ',');
-        pkt.processId = static_cast<uint32_t>(std::stoul(temp));
-
-        std::getline(ss, temp, ',');
-        pkt.sourcePort = static_cast<uint16_t>(std::stoi(temp));
-
-        std::getline(ss, temp, ',');
-        pkt.destPort = static_cast<uint16_t>(std::stoi(temp));
-
-        std::getline(ss, temp, ',');
+        std::getline(ss, temp, ','); // totalSize
         pkt.totalSize = std::stoull(temp);
 
-        std::getline(ss, temp, ',');
+        std::getline(ss, temp, ','); // packetCount
         pkt.packetCount = std::stoul(temp);
 
-        std::getline(ss, temp, ',');
+        std::getline(ss, temp, ','); // processId
+        pkt.processId = static_cast<uint32_t>(std::stoul(temp));
+
+        std::getline(ss, temp, ','); // sourcePort
+        pkt.sourcePort = static_cast<uint16_t>(std::stoi(temp));
+
+        std::getline(ss, temp, ','); // destPort
+        pkt.destPort = static_cast<uint16_t>(std::stoi(temp));
+
+        std::getline(ss, temp, ','); // direction
         pkt.direction = (temp == "in") ? PacketDirection::Incoming : PacketDirection::Outgoing;
+
 
         loaded[pkt.GetKey()] = pkt;
     }
@@ -532,7 +533,6 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
             newKeys.insert(key);
         }
     }
-
     // Если есть новые ключи, обновляем весь список
     if (!newKeys.empty()) {
         connectionsListView.Clear();
@@ -546,8 +546,27 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
             auto it = groupsCopy.find(key);
             if (it == groupsCopy.end())
                 continue;
-
             const auto& packet = it->second;
+
+            // --- ФИЛЬТРАЦИЯ ПО ПРОТОКОЛУ ---
+            switch (settings.protocolFilter) {
+            case ProtocolFilter::All:
+                // показываем любой пакет
+                break;
+            case ProtocolFilter::TCP_UDP:
+                if (packet.protocol != "TCP" && packet.protocol != "UDP")
+                    continue;
+                break;
+            case ProtocolFilter::TCP:
+                if (packet.protocol != "TCP")
+                    continue;
+                break;
+            case ProtocolFilter::UDP:
+                if (packet.protocol != "UDP")
+                    continue;
+                break;
+            }
+
             std::vector<std::wstring> items;
             items.reserve(8);
             items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий");
@@ -833,73 +852,29 @@ bool MainWindow::CreateControls() {
     // Кнопки управления
     int buttonY = MARGIN * 2 + LABEL_HEIGHT;
 
-    int x = 10;
-    int y = 20;
-    const int ICON_BTN_SIZE = 28;
-    const int ICON_BTN_SPACING = 2;
-
     // Новый размер
     const int COMPACT_BUTTON_WIDTH = 80;
     const int COMPACT_BUTTON_HEIGHT = 22;
     const int COMPACT_MARGIN = 4;
 
-    HICON hIconPlay = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_PLAY));
-    HICON hIconStop = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_STOP));
-    HICON hIconSettings = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_SETTINGS));
-
     // Считаем позицию каждой кнопки компактно:
     int buttonX = MARGIN;
-    HWND hBtnPlay = CreateWindowEx(0, WC_BUTTON, L"",
-        WS_CHILD | WS_VISIBLE | BS_ICON,
-        x, y, 28, 28,
-        hwnd, (HMENU)IDC_START_CAPTURE, hInstance, NULL);
+    auto add_btn = [&](LPCWSTR text, int id) {
+        CreateWindowEx(
+            0, WC_BUTTON, text,
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            buttonX, buttonY, COMPACT_BUTTON_WIDTH, COMPACT_BUTTON_HEIGHT,
+            hwnd, (HMENU)id, hInstance, NULL
+        );
+        buttonX += COMPACT_BUTTON_WIDTH + COMPACT_MARGIN;
+        };
 
-    x += ICON_BTN_SIZE + ICON_BTN_SPACING;
-
-    HWND hBtnStop = CreateWindowEx(0, WC_BUTTON, L"",
-        WS_CHILD | WS_VISIBLE | BS_ICON,
-        x + 32, y, 28, 28,
-        hwnd, (HMENU)IDC_STOP_CAPTURE, hInstance, NULL);
-
-    x += ICON_BTN_SIZE + ICON_BTN_SPACING;
-
-    HWND hBtnSettings = CreateWindowEx(0, WC_BUTTON, L"",
-        WS_CHILD | WS_VISIBLE | BS_ICON,
-        x + 64, y, 28, 28,
-        hwnd, (HMENU)IDC_OPEN_SETTINGS, hInstance, NULL);
-
-
-
-    SendMessage(hBtnPlay, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconPlay);
-    SendMessage(hBtnStop, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconStop);
-    SendMessage(hBtnSettings, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconSettings);
-
-    HWND hToolTip = CreateWindowEx(0, TOOLTIPS_CLASS, NULL,
-        WS_POPUP | TTS_ALWAYSTIP,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        hwnd, NULL, hInstance, NULL);
-
-    TOOLINFO ti = { 0 };
-    ti.cbSize = sizeof(TOOLINFO);
-    ti.uFlags = TTF_SUBCLASS;
-    ti.hwnd = hwnd;
-
-    // Для Play
-    ti.uId = (UINT_PTR)hBtnPlay;
-    ti.lpszText = (LPWSTR)L"Начать захват";
-    SendMessage(hToolTip, TTM_ADDTOOL, 0, (LPARAM)&ti);
-
-    // Для Stop
-    ti.uId = (UINT_PTR)hBtnStop;
-    ti.lpszText = (LPWSTR)L"Остановить захват";
-    SendMessage(hToolTip, TTM_ADDTOOL, 0, (LPARAM)&ti);
-
-    // Для Settings
-    ti.uId = (UINT_PTR)hBtnSettings;
-    ti.lpszText = (LPWSTR)L"Настройки";
-    SendMessage(hToolTip, TTM_ADDTOOL, 0, (LPARAM)&ti);
-    //add_btn(L"Настройки", IDC_OPEN_SETTINGS);
+    add_btn(L"Старт", IDC_START_CAPTURE);
+    add_btn(L"Стоп", IDC_STOP_CAPTURE);
+    add_btn(L"Сохранить", ID_SAVE_PACKETS);
+    add_btn(L"Очистить", ID_CLEAR_SAVED_PACKETS);
+    add_btn(L"Правила", IDC_OPEN_RULES);
+    add_btn(L"Настройки", IDC_OPEN_SETTINGS);
 
     // ComboBox размещаем справа
     HWND adapterCombo = CreateWindowEx(
@@ -1367,11 +1342,6 @@ void MainWindow::OpenRulesDialog() {
     // Здесь можно вызвать диалог или открыть отдельное окно с правилами
 }
 
-void MainWindow::OpenSettingsDialog() {
-    MessageBox(hwnd, L"Окно с настройками будет реализовано.", L"Настройки", MB_OK | MB_ICONINFORMATION);
-    // Здесь можно вызвать диалог или открыть отдельное окно с настройками
-}
-
 void MainWindow::OnAdapterSelected() {
     if (!selectedAdapterIp.empty()) {
         adapterPackets[selectedAdapterIp] = groupedPackets;
@@ -1623,6 +1593,55 @@ INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPA
         }
         }
         break;
+    }
+    return FALSE;
+}
+
+void MainWindow::OpenSettingsDialog() {
+    DialogBoxParam(hInstance, MAKEINTRESOURCE(IDD_SETTINGS_DIALOG), hwnd, SettingsDialogProc, (LPARAM)this);
+}
+
+INT_PTR CALLBACK MainWindow::SettingsDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    MainWindow* window;
+    if (uMsg == WM_INITDIALOG) {
+        window = reinterpret_cast<MainWindow*>(lParam);
+        SetWindowLongPtr(hwndDlg, GWLP_USERDATA, (LONG_PTR)window);
+
+        switch (window->settings.protocolFilter) {
+        case ProtocolFilter::All:
+            CheckRadioButton(hwndDlg, IDC_RADIO_ALL, IDC_RADIO_UDP, IDC_RADIO_ALL);
+            break;
+        case ProtocolFilter::TCP_UDP:
+            CheckRadioButton(hwndDlg, IDC_RADIO_ALL, IDC_RADIO_UDP, IDC_RADIO_TCP_UDP);
+            break;
+        case ProtocolFilter::TCP:
+            CheckRadioButton(hwndDlg, IDC_RADIO_ALL, IDC_RADIO_UDP, IDC_RADIO_TCP);
+            break;
+        case ProtocolFilter::UDP:
+            CheckRadioButton(hwndDlg, IDC_RADIO_ALL, IDC_RADIO_UDP, IDC_RADIO_UDP);
+            break;
+        }
+        return TRUE;
+    }
+    if (uMsg == WM_COMMAND) {
+        if (LOWORD(wParam) == IDOK) {
+            window = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hwndDlg, GWLP_USERDATA));
+            if (IsDlgButtonChecked(hwndDlg, IDC_RADIO_ALL))
+                window->settings.protocolFilter = ProtocolFilter::All;
+            else if (IsDlgButtonChecked(hwndDlg, IDC_RADIO_TCP_UDP))
+                window->settings.protocolFilter = ProtocolFilter::TCP_UDP;
+            else if (IsDlgButtonChecked(hwndDlg, IDC_RADIO_TCP))
+                window->settings.protocolFilter = ProtocolFilter::TCP;
+            else if (IsDlgButtonChecked(hwndDlg, IDC_RADIO_UDP))
+                window->settings.protocolFilter = ProtocolFilter::UDP;
+            EndDialog(hwndDlg, IDOK);
+            window->UpdateGroupedPackets();
+            return TRUE;
+        }
+        if (LOWORD(wParam) == IDCANCEL) {
+            EndDialog(hwndDlg, IDCANCEL);
+            return TRUE;
+        }
     }
     return FALSE;
 }

@@ -21,6 +21,19 @@ enum class Protocol {
     ANY
 };
 
+enum class ProtocolFilter
+{
+    All,
+    TCP_UDP,
+    TCP,
+    UDP
+};
+
+struct AppSettings
+{
+    ProtocolFilter protocolFilter = ProtocolFilter::All;
+};
+
 // Структуры сетевого уровня
 #pragma pack(push, 1)
 struct IPHeader {
@@ -159,6 +172,7 @@ struct PacketInfo {
     {
     }
 };
+
 
 struct GroupedPacketInfo {
     std::string sourceIp;

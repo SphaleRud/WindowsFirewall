@@ -51,6 +51,8 @@ private:
     static const int COMBO_HEIGHT = 200;
     static const int COMBO_WIDTH = 250;
 
+    AppSettings settings;
+
     std::deque<PacketInfo> packetQueue;
     std::mutex packetMutex;
     static const size_t MAX_QUEUE_SIZE = 1000;
@@ -84,6 +86,8 @@ private:
     void UpdateGroupedPackets();
 
     UINT_PTR timerId;
+
+    static INT_PTR CALLBACK SettingsDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
     static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     static INT_PTR CALLBACK AdapterDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);

@@ -96,6 +96,7 @@ struct Rule {
     Protocol protocol;
     RuleAction action;
     bool enabled;
+    std::string description;
 };
 
 struct Connection {

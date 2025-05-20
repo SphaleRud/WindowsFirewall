@@ -506,28 +506,6 @@ bool PacketInterceptor::StopCapture() {
     return true;
 }
 
-static std::map<std::string, std::string> g_ipDomainCache;
-std::string GetDomainByIp(const std::string& ip) {
-    if (ip.empty() || ip == "Unknown") return "";
-    auto it = g_ipDomainCache.find(ip);
-    if (it != g_ipDomainCache.end())
-        return it->second;
-
-    char host[NI_MAXHOST] = { 0 };
-    sockaddr_in sa = {};
-    sa.sin_family = AF_INET;
-    inet_pton(AF_INET, ip.c_str(), &(sa.sin_addr));
-    sa.sin_port = 0;
-
-    int res = getnameinfo((sockaddr*)&sa, sizeof(sa), host, NI_MAXHOST, nullptr, 0, NI_NAMEREQD);
-    std::string result;
-    if (res == 0) {
-        result = host;
-    }
-    g_ipDomainCache[ip] = result;
-    return result;
-}
-
 void PacketInterceptor::CaptureThread(PacketInterceptor* interceptor) {
     try {
         OutputDebugStringA("Capture thread starting\n");
@@ -763,9 +741,6 @@ void PacketInterceptor::ProcessPacket(const pcap_pkthdr* header, const u_char* p
                     info.destPort = ntohs(udp->destPort);
                 }
             }
-
-            info.sourceDomain = GetDomainByIp(info.sourceIp);
-            info.destDomain = GetDomainByIp(info.destIp);
 
             // PID и имя процесса
             uint32_t pid = 0;

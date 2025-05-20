@@ -14,6 +14,7 @@
 #define IDC_WINDOWSFIREWALL             109
 #define IDR_MAINFRAME                   128
 #define IDD_DIALOG1                     129
+
 #define IDD_PACKET_PROPERTIES           1010
 #define IDC_ADAPTER_LABEL               1001
 #define IDC_SELECT_ADAPTER              1002
@@ -21,10 +22,14 @@
 #define IDC_STOP_CAPTURE                1004
 #define IDC_PACKET_LIST                 1005
 #define IDC_ADAPTER_COMBO               1006
-#define IDC_OPEN_RULES					1007
-#define IDC_OPEN_SETTINGS				1008
+#define IDC_SAVE_PACKETS                1007
+#define IDC_CLEAR_SAVED_PACKETS         1008
+#define IDC_OPEN_RULES					1009
+#define IDC_OPEN_SETTINGS				1010
+
 #define IDD_SELECT_ADAPTER              2000
 #define IDC_ADAPTER_LIST                2001
+
 #define IDD_PACKET_PROPERTIES			3001
 #define IDC_TIME						3002
 #define IDC_SIZE						3003
@@ -37,9 +42,16 @@
 #define IDC_BLOCK_IP					3010
 #define IDC_SOURCE_DOMAIN				3011
 #define IDC_DEST_DOMAIN					3012
+
+#define IDD_RULES_DIALOG                4000
+#define IDC_RULES_LIST                  4001
+#define ID_ADD_RULE                     4002
+#define ID_DELETE_RULE                  4003
+
 #define IDI_ICON_PLAY					5001
 #define IDI_ICON_STOP					5002
 #define IDI_ICON_SETTINGS				5003
+
 #define IDD_SETTINGS_DIALOG				6001
 #define IDC_SAVE_SETTINGS				6002
 #define IDC_RADIO_ALL					6101

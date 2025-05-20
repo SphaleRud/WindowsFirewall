@@ -12,6 +12,8 @@
 #include <psapi.h>
 #include <wbemidl.h>
 #include <comdef.h>
+#include "rule_manager.h"
+
 
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment(lib, "psapi.lib")
@@ -22,15 +24,20 @@
 name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
 processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
-// ID компонентов
-#define ID_SAVE_PACKETS 2001
-#define ID_CLEAR_SAVED_PACKETS 2002
-#define ID_RULES_LIST 1001
-#define ID_CONNECTIONS_LIST 1002
-#define ID_ADD_RULE 1003
-#define ID_DELETE_RULE 1004
-#define ID_START_CAPTURE 1005
-#define ID_STOP_CAPTURE 1006
+void MainWindow::OpenRulesDialog() {
+    RuleManager::Instance().ShowRulesDialog(hwnd);
+}
+
+std::string GetDomainByIp(const std::string& ip) {
+    if (ip.empty() || ip == "Unknown") return "";
+    char host[NI_MAXHOST] = { 0 };
+    sockaddr_in sa = {};
+    sa.sin_family = AF_INET;
+    inet_pton(AF_INET, ip.c_str(), &(sa.sin_addr));
+    sa.sin_port = 0;
+    int res = getnameinfo((sockaddr*)&sa, sizeof(sa), host, NI_MAXHOST, nullptr, 0, NI_NAMEREQD);
+    return (res == 0) ? std::string(host) : "";
+}
 
 std::string TimeTToString(const time_t& time) {
     std::ostringstream oss;
@@ -446,9 +453,7 @@ void MainWindow::SaveAdapterPackets(const std::string& adapter) {
     for (const auto& pair : groupedPackets) {
         const auto& pkt = pair.second;
         fout << pkt.time << ','  // Добавляем время первым полем
-            << pkt.sourceDomain << ','
             << pkt.sourceIp << ','
-            << pkt.destDomain << ','
             << pkt.destIp << ','
             << pkt.protocol << ','
             << pkt.processName << ','
@@ -474,9 +479,7 @@ void MainWindow::LoadAdapterPackets(const std::string& adapter) {
         GroupedPacketInfo pkt;
 
         std::getline(ss, pkt.time, ',');
-        std::getline(ss, pkt.sourceDomain, ',');
         std::getline(ss, pkt.sourceIp, ',');
-        std::getline(ss, pkt.destDomain, ',');
         std::getline(ss, pkt.destIp, ',');
         std::getline(ss, pkt.protocol, ',');
         std::getline(ss, pkt.processName, ',');
@@ -580,10 +583,8 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
             std::vector<std::wstring> items;
             items.reserve(8);
             items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий");
-            items.push_back(StringToWString(packet.sourceDomain));
             items.push_back(StringToWString(packet.sourceIp));
             items.push_back(std::to_wstring(packet.sourcePort));
-            items.push_back(StringToWString(packet.destDomain));
             items.push_back(StringToWString(packet.destIp));
             items.push_back(std::to_wstring(packet.destPort));
             items.push_back(StringToWString(packet.protocol));
@@ -632,14 +633,9 @@ void MainWindow::ProcessPacket(const PacketInfo& info) {
     // Преобразование имени процесса
     std::wstring processName = StringToWString(info.processName);
 
-    std::wstring sourceDomain = StringToWString(info.sourceDomain);
-    std::wstring destDomain = StringToWString(info.destDomain);
-
     // Форматируем строку для отображения
 	std::wstring packetInfo = time + L" | " +
         direction + L" | " +
-        sourceDomain + L" | " +
-        destDomain + L" | " +
         sourceIp + L":" + std::to_wstring(info.sourcePort) + L" → " +
         destIp + L":" + std::to_wstring(info.destPort) + L" | " +
         protocol + L" | " +
@@ -888,8 +884,8 @@ bool MainWindow::CreateControls() {
 
     add_btn(L"Старт", IDC_START_CAPTURE);
     add_btn(L"Стоп", IDC_STOP_CAPTURE);
-    add_btn(L"Сохранить", ID_SAVE_PACKETS);
-    add_btn(L"Очистить", ID_CLEAR_SAVED_PACKETS);
+    add_btn(L"Сохранить", IDC_SAVE_PACKETS);
+    add_btn(L"Очистить", IDC_CLEAR_SAVED_PACKETS);
     add_btn(L"Правила", IDC_OPEN_RULES);
     add_btn(L"Настройки", IDC_OPEN_SETTINGS);
 
@@ -947,7 +943,7 @@ void MainWindow::ShowAdapterSelectionDialog() {
 
 // Инициализация списков
 bool MainWindow::InitializeRulesList() {
-    if (!rulesListView.Initialize(hwnd, 10, 40, 760, 200, (HMENU)ID_RULES_LIST, hInstance)) {
+    if (!rulesListView.Initialize(hwnd, 10, 40, 760, 200, (HMENU)IDC_RULES_LIST, hInstance)) {
         return false;
     }
 
@@ -985,10 +981,8 @@ bool MainWindow::InitializeConnectionsList(int yPosition) {
         int width;
     } columns[] = {
         {L"Направление", 80},     // 0
-        {L"Domain источника", 120},
         {L"IP источника", 90},   // 1
         {L"Порт источника", 60},  // 2
-        {L"Domain назначения", 120},
         {L"IP назначения", 90},  // 3
         {L"Порт назначения", 60}, // 4
         {L"Протокол", 80},        // 5
@@ -1070,9 +1064,6 @@ bool MainWindow::OnPacketCaptured(const PacketInfo& packet) {
         groupInfo.direction = packet.direction;
         groupInfo.processPath = GetProcessPath(packet.processId);
 
-        groupInfo.sourceDomain = packet.sourceDomain;
-        groupInfo.destDomain = packet.destDomain;
-
         // Инициализируем размер и счетчик для нового пакета
         groupInfo.totalSize = packet.size;
         groupInfo.packetCount = 1;
@@ -1132,8 +1123,8 @@ void MainWindow::StartCapture() {
     packetInterceptor.SetCurrentAdapter(selectedAdapterIp);
     if (packetInterceptor.StartCapture(selectedAdapterIp)) {
         isCapturing = true;
-        EnableWindow(GetDlgItem(hwnd, ID_START_CAPTURE), FALSE);
-        EnableWindow(GetDlgItem(hwnd, ID_STOP_CAPTURE), TRUE);
+        EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), FALSE);
+        EnableWindow(GetDlgItem(hwnd, IDC_STOP_CAPTURE), TRUE);
 
         std::wstring message = L"Started capturing on " + GetAdapterDisplayName();
         AddSystemMessage(message);
@@ -1153,8 +1144,8 @@ void MainWindow::StopCapture() {
 
     packetInterceptor.StopCapture();
     isCapturing = false;
-    EnableWindow(GetDlgItem(hwnd, ID_START_CAPTURE), TRUE);
-    EnableWindow(GetDlgItem(hwnd, ID_STOP_CAPTURE), FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
+    EnableWindow(GetDlgItem(hwnd, IDC_STOP_CAPTURE), FALSE);
 
     AddSystemMessage(L"Stopped capturing");
     OutputDebugString(L"Stopped capture\n");
@@ -1471,7 +1462,7 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
                 return 0;
             }
             switch (wmId) {
-            case ID_SAVE_PACKETS:
+            case IDC_SAVE_PACKETS:
                 if (wmEvent == BN_CLICKED) {
                     window->SaveAdapterPackets(window->selectedAdapterIp);
                     return 0;
@@ -1489,7 +1480,7 @@ LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
                     return 0;
                 }
                 break;
-            case ID_CLEAR_SAVED_PACKETS:
+            case IDC_CLEAR_SAVED_PACKETS:
                 if (wmEvent == BN_CLICKED) {
                     window->ClearSavedAdapterPackets(window->selectedAdapterIp);
                     return 0;
@@ -1549,6 +1540,9 @@ INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPA
         GroupedPacketInfo* packet = reinterpret_cast<GroupedPacketInfo*>(lParam);
         if (!packet) return FALSE;
 
+        SetDlgItemText(hwnd, IDC_SOURCE_DOMAIN, L"Запрос...");
+        SetDlgItemText(hwnd, IDC_DEST_DOMAIN, L"Запрос...");
+
         // Время первого появления пакета
         if (!packet->time.empty()) {
             std::wstring timeStr = L"Первое появление: " + StringToWString(packet->time);
@@ -1577,10 +1571,19 @@ INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPA
         SetDlgItemText(hwnd, IDC_PROCESS_NAME,
             StringToWString(packet->processName).c_str());
 
-        SetDlgItemText(hwnd, IDC_SOURCE_DOMAIN,
-            !packet->sourceDomain.empty() ? StringToWString(packet->sourceDomain).c_str() : L"(нет данных)");
-        SetDlgItemText(hwnd, IDC_DEST_DOMAIN,
-            !packet->destDomain.empty() ? StringToWString(packet->destDomain).c_str() : L"(нет данных)");
+        std::string sourceIp = packet->sourceIp;
+        std::string destIp = packet->destIp;
+
+        std::thread([hwnd, sourceIp, destIp]() {
+            std::string srcDom = GetDomainByIp(sourceIp);
+            std::string dstDom = GetDomainByIp(destIp);
+            // Обновление GUI из фонового потока: используем SendMessage/PostMessage через кастомное сообщение или простой вызов SetDlgItemText в main thread
+            std::wstring srcW = srcDom.empty() ? L"(нет данных)" : MainWindow::StringToWString(srcDom);
+            std::wstring dstW = dstDom.empty() ? L"(нет данных)" : MainWindow::StringToWString(dstDom);
+            // Лучше через PostMessage + кастомное сообщение, но для простоты (если поток GUI не сильно используется):
+            SendMessage(hwnd, WM_USER + 100, (WPARAM)new std::wstring(srcW), 1);
+            SendMessage(hwnd, WM_USER + 100, (WPARAM)new std::wstring(dstW), 2);
+            }).detach();
 
         // Путь процесса - если путь пустой, пробуем получить его снова
         std::string processPath = packet->processPath;
@@ -1603,7 +1606,15 @@ INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPA
 
         return TRUE;
     }
-
+    case WM_USER + 100: {
+        std::wstring* dom = reinterpret_cast<std::wstring*>(wParam);
+        if (lParam == 1) // source
+            SetDlgItemText(hwnd, IDC_SOURCE_DOMAIN, dom->c_str());
+        else if (lParam == 2) // dest
+            SetDlgItemText(hwnd, IDC_DEST_DOMAIN, dom->c_str());
+        delete dom;
+        return TRUE;
+    }
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case IDOK:

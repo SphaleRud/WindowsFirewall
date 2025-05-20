@@ -35,6 +35,8 @@
 #define IDC_PROCESS_NAME				3008
 #define IDC_PROCESS_PATH				3009
 #define IDC_BLOCK_IP					3010
+#define IDC_SOURCE_DOMAIN				3011
+#define IDC_DEST_DOMAIN					3012
 #define IDI_ICON_PLAY					5001
 #define IDI_ICON_STOP					5002
 #define IDI_ICON_SETTINGS				5003

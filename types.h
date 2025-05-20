@@ -157,6 +157,8 @@ struct PacketInfo {
     std::string protocol;
     std::string processName;
     std::string time;
+    std::string sourceDomain;
+    std::string destDomain;
     size_t size;
     uint16_t sourcePort;
     uint32_t  processId;
@@ -181,6 +183,8 @@ struct GroupedPacketInfo {
     std::string processName;
     std::string processPath;
     std::string time;
+    std::string sourceDomain;
+    std::string destDomain;
     uint32_t processId;
     uint16_t sourcePort;
     uint16_t destPort;

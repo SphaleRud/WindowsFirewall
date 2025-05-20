@@ -446,7 +446,9 @@ void MainWindow::SaveAdapterPackets(const std::string& adapter) {
     for (const auto& pair : groupedPackets) {
         const auto& pkt = pair.second;
         fout << pkt.time << ','  // Добавляем время первым полем
+            << pkt.sourceDomain << ','
             << pkt.sourceIp << ','
+            << pkt.destDomain << ','
             << pkt.destIp << ','
             << pkt.protocol << ','
             << pkt.processName << ','
@@ -472,7 +474,9 @@ void MainWindow::LoadAdapterPackets(const std::string& adapter) {
         GroupedPacketInfo pkt;
 
         std::getline(ss, pkt.time, ',');
+        std::getline(ss, pkt.sourceDomain, ',');
         std::getline(ss, pkt.sourceIp, ',');
+        std::getline(ss, pkt.destDomain, ',');
         std::getline(ss, pkt.destIp, ',');
         std::getline(ss, pkt.protocol, ',');
         std::getline(ss, pkt.processName, ',');
@@ -548,6 +552,12 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
                 continue;
             const auto& packet = it->second;
 
+            OutputDebugStringA(("UpdateGroupedPacketsNoDuplicates: proto=" + packet.protocol +
+                " src=" + packet.sourceIp +
+                " dst=" + packet.destIp +
+                " sport=" + std::to_string(packet.sourcePort) +
+                " dport=" + std::to_string(packet.destPort) + "\n").c_str());
+
             // --- ФИЛЬТРАЦИЯ ПО ПРОТОКОЛУ ---
             switch (settings.protocolFilter) {
             case ProtocolFilter::All:
@@ -570,8 +580,10 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
             std::vector<std::wstring> items;
             items.reserve(8);
             items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий");
+            items.push_back(StringToWString(packet.sourceDomain));
             items.push_back(StringToWString(packet.sourceIp));
             items.push_back(std::to_wstring(packet.sourcePort));
+            items.push_back(StringToWString(packet.destDomain));
             items.push_back(StringToWString(packet.destIp));
             items.push_back(std::to_wstring(packet.destPort));
             items.push_back(StringToWString(packet.protocol));
@@ -620,9 +632,14 @@ void MainWindow::ProcessPacket(const PacketInfo& info) {
     // Преобразование имени процесса
     std::wstring processName = StringToWString(info.processName);
 
+    std::wstring sourceDomain = StringToWString(info.sourceDomain);
+    std::wstring destDomain = StringToWString(info.destDomain);
+
     // Форматируем строку для отображения
 	std::wstring packetInfo = time + L" | " +
         direction + L" | " +
+        sourceDomain + L" | " +
+        destDomain + L" | " +
         sourceIp + L":" + std::to_wstring(info.sourcePort) + L" → " +
         destIp + L":" + std::to_wstring(info.destPort) + L" | " +
         protocol + L" | " +
@@ -968,8 +985,10 @@ bool MainWindow::InitializeConnectionsList(int yPosition) {
         int width;
     } columns[] = {
         {L"Направление", 80},     // 0
+        {L"Domain источника", 120},
         {L"IP источника", 90},   // 1
         {L"Порт источника", 60},  // 2
+        {L"Domain назначения", 120},
         {L"IP назначения", 90},  // 3
         {L"Порт назначения", 60}, // 4
         {L"Протокол", 80},        // 5
@@ -1034,6 +1053,12 @@ void MainWindow::UpdateGroupedPackets() {
 
 bool MainWindow::OnPacketCaptured(const PacketInfo& packet) {
     try {
+        OutputDebugStringA(("OnPacketCaptured: proto=" + packet.protocol +
+            " src=" + packet.sourceIp +
+            " dst=" + packet.destIp +
+            " sport=" + std::to_string(packet.sourcePort) +
+            " dport=" + std::to_string(packet.destPort) + "\n").c_str());
+
         GroupedPacketInfo groupInfo;
         groupInfo.sourceIp = packet.sourceIp;
         groupInfo.destIp = packet.destIp;
@@ -1044,6 +1069,9 @@ bool MainWindow::OnPacketCaptured(const PacketInfo& packet) {
         groupInfo.destPort = packet.destPort;
         groupInfo.direction = packet.direction;
         groupInfo.processPath = GetProcessPath(packet.processId);
+
+        groupInfo.sourceDomain = packet.sourceDomain;
+        groupInfo.destDomain = packet.destDomain;
 
         // Инициализируем размер и счетчик для нового пакета
         groupInfo.totalSize = packet.size;
@@ -1548,6 +1576,11 @@ INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPA
 
         SetDlgItemText(hwnd, IDC_PROCESS_NAME,
             StringToWString(packet->processName).c_str());
+
+        SetDlgItemText(hwnd, IDC_SOURCE_DOMAIN,
+            !packet->sourceDomain.empty() ? StringToWString(packet->sourceDomain).c_str() : L"(нет данных)");
+        SetDlgItemText(hwnd, IDC_DEST_DOMAIN,
+            !packet->destDomain.empty() ? StringToWString(packet->destDomain).c_str() : L"(нет данных)");
 
         // Путь процесса - если путь пустой, пробуем получить его снова
         std::string processPath = packet->processPath;

@@ -1,18 +1,6 @@
 #pragma once
+#include "firewall_types.h"
 #include <string>
-#include "types.h"
-
-enum class Protocol {
-    ANY,
-    TCP,
-    UDP,
-    ICMP
-};
-
-enum class RuleAction {
-    ALLOW,
-    BLOCK
-};
 
 class Rule {
 public:
@@ -23,11 +11,10 @@ public:
         , destPort(0)
         , action(RuleAction::ALLOW)
         , enabled(true)
-        , direction(RuleDirection::Inbound)  // Используем RuleDirection из types.h
+        , direction(RuleDirection::Inbound)
     {
     }
 
-    // Обновляем конструктор копирования
     Rule(const Rule& other)
         : id(other.id)
         , name(other.name)
@@ -41,10 +28,11 @@ public:
         , action(other.action)
         , enabled(other.enabled)
         , direction(other.direction)
+        , creator(other.creator)
+        , creationTime(other.creationTime)
     {
     }
 
-    // Обновляем оператор присваивания
     Rule& operator=(const Rule& other) {
         if (this != &other) {
             id = other.id;
@@ -59,6 +47,8 @@ public:
             action = other.action;
             enabled = other.enabled;
             direction = other.direction;
+            creator = other.creator;
+            creationTime = other.creationTime;
         }
         return *this;
     }
@@ -74,5 +64,7 @@ public:
     std::string appPath;
     RuleAction action;
     bool enabled;
-    RuleDirection direction;  // Используем RuleDirection из types.h
+    RuleDirection direction;
+    std::string creator;        // Добавлено: имя создателя правила
+    std::string creationTime;   // Добавлено: время создания в UTC
 };

@@ -69,7 +69,6 @@ private:
 
     std::mutex groupedPacketsMutex;
     std::map<std::string, GroupedPacketInfo> groupedPackets;
-    void UpdateGroupedPacketsIncremental();
     void UpdateGroupedPacketsNoDuplicates();
     std::set<std::string> displayedKeys;
 
@@ -97,7 +96,6 @@ private:
     bool InitializeConnectionsList(int yPosition);
     void DeleteRule();
 
-    bool CreateMainWindow();
     void OnAdapterSelected();
     void StartCapture();
     void StopCapture();

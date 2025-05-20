@@ -6,6 +6,7 @@
 #include "rule.h"
 #include "types.h"
 #include <Windows.h>
+#include "connection.h"
 
 class RuleManager {
 private:
@@ -23,15 +24,8 @@ public:
 
     static RuleManager& Instance();
 
-    void SetDirection(RuleDirection direction) {
-        std::lock_guard<std::mutex> lock(ruleMutex);
-        currentDirection = direction;
-    }
-
-    RuleDirection GetCurrentDirection() const {
-        std::lock_guard<std::mutex> lock(ruleMutex);
-        return currentDirection;
-    }
+    void SetDirection(RuleDirection direction);
+    RuleDirection GetCurrentDirection() const;
 
     bool ShowAddRuleWizard(HWND hParent);
     bool AddRule(const Rule& rule);

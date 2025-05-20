@@ -302,17 +302,9 @@ bool MainWindow::Initialize(HINSTANCE hInstance) {
     std::vector<AdapterInfo> adapters = packetInterceptor.GetAdapters();
     if (!adapters.empty()) {
         selectedAdapterIp = adapters[0].address;
-        // Вызываем UpdateAdapterInfo без параметров
-        UpdateAdapterInfo();
-    }
-
-    // Автоматически выбираем первый адаптер
-    if (!adapters.empty()) {
         HWND comboBox = GetDlgItem(hwnd, IDC_ADAPTER_COMBO);
         SendMessage(comboBox, CB_SETCURSEL, 0, 0);
-        selectedAdapterIp = adapters[0].address;
         UpdateAdapterInfo();
-        EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
     }
 
     // Инициализируем адаптер сразу после создания окна
@@ -344,91 +336,6 @@ std::wstring MainWindow::FormatFileSize(size_t bytes) {
 
 
 
-// Новый метод: добавлять только новые элементы
-void MainWindow::UpdateGroupedPacketsIncremental() {
-    std::deque<std::string> orderCopy;
-    std::map<std::string, GroupedPacketInfo> groupsCopy;
-    {
-        std::lock_guard<std::mutex> lock(groupedPacketsMutex);
-        orderCopy = groupedPacketView.order;
-        groupsCopy = groupedPackets;
-    }
-
-    // Определяем сколько уже отрисовано строк
-    size_t listCount = connectionsListView.GetItemCount();
-    size_t total = orderCopy.size();
-    size_t start = (total > MAX_DISPLAYED_PACKETS) ? total - MAX_DISPLAYED_PACKETS : 0;
-
-    // Если полностью сбились с синхронизации — перерисовываем весь список
-    if (listCount > (total - start) + 10) {
-        // слишком много лишнего, делаем полный сброс
-        connectionsListView.SetRedraw(false);
-        connectionsListView.Clear();
-        listCount = 0;
-        connectionsListView.SetRedraw(true);
-    }
-
-    // Добавляем только новые строки (уникальные ключи)
-    for (size_t i = listCount + start; i < total; ++i) {
-        const std::string& key = orderCopy[i];
-        auto it = groupsCopy.find(key);
-        if (it == groupsCopy.end())
-            continue;
-        const auto& packet = it->second;
-        std::vector<std::wstring> items;
-        items.reserve(8);
-        items.push_back(packet.direction == PacketDirection::Incoming ? L"Входящий" : L"Исходящий");
-        items.push_back(StringToWString(packet.sourceIp));
-        items.push_back(std::to_wstring(packet.sourcePort));
-        items.push_back(StringToWString(packet.destIp));
-        items.push_back(std::to_wstring(packet.destPort));
-        items.push_back(StringToWString(packet.protocol));
-        items.push_back(std::to_wstring(packet.processId));
-        items.push_back(StringToWString(packet.processName));
-        connectionsListView.AddItem(items);
-    }
-    // Лимитируем длину списка
-    while (connectionsListView.GetItemCount() > MAX_DISPLAYED_PACKETS) {
-        connectionsListView.DeleteItem(0);
-    }
-    InvalidateRect(connectionsListView.GetHandle(), NULL, FALSE);
-}
-
-
-
-
-bool MainWindow::CreateMainWindow() {
-    WNDCLASSEXW wc = { sizeof(WNDCLASSEXW) };
-    wc.lpfnWndProc = MainWndProc;
-    wc.hInstance = hInstance;
-    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    wc.lpszClassName = L"WindowsFirewallClass";
-
-    if (!RegisterClassExW(&wc)) {
-        return false;
-    }
-
-    hwnd = CreateWindowExW(
-        0,
-        L"WindowsFirewallClass",
-        L"Windows Firewall",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        800, 600,
-        nullptr,
-        nullptr,
-        hInstance,
-        this
-    );
-
-    if (!hwnd) {
-        return false;
-    }
-
-    // Создаем контролы
-    return CreateControls();
-}
 
 void MainWindow::SaveAdapterPackets(const std::string& adapter) {
     if (adapter.empty()) {
@@ -909,22 +816,6 @@ bool MainWindow::CreateControls() {
     if (!InitializeConnectionsList(listY)) {
         return false;
     }
-/*
-    // ListView для пакетов
-    int listY = buttonY + BUTTON_HEIGHT + MARGIN;
-    if (!connectionsListView.Initialize(hwnd, MARGIN, listY,
-        WINDOW_WIDTH - 2 * MARGIN, WINDOW_HEIGHT - listY - MARGIN,
-        (HMENU)IDC_PACKET_LIST, hInstance)) {
-        return false;
-    }
-
-    // Добавляем колонки
-    connectionsListView.AddColumn(L"Направление", 80, 0);  
-    connectionsListView.AddColumn(L"Источник", 180, 1);    
-    connectionsListView.AddColumn(L"Назначение", 180, 2);  
-    connectionsListView.AddColumn(L"Протокол", 80, 3);     
-    connectionsListView.AddColumn(L"Процесс", 150, 4);     
-*/
     return true;
 }
 
@@ -1397,135 +1288,142 @@ void MainWindow::OnAdapterSelected() {
 
 LRESULT CALLBACK MainWindow::MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     MainWindow* window = nullptr;
-    if (msg == WM_CREATE) {
-        CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lParam);
-        window = reinterpret_cast<MainWindow*>(createStruct->lpCreateParams);
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(window));
-        SetTimer(hwnd, 1, UPDATE_INTERVAL, NULL);
-    }
-    else {
-        window = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
-    }
+    try {
+        if (msg == WM_CREATE) {
+            CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lParam);
+            window = reinterpret_cast<MainWindow*>(createStruct->lpCreateParams);
+            SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(window));
+            SetTimer(hwnd, 1, UPDATE_INTERVAL, NULL);
+        }
+        else {
+            window = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+        }
 
-    if (window) {
-        switch (msg) {
+        if (window) {
+            switch (msg) {
 
-        case WM_APP + 1: // Наше пользовательское сообщение для инициализации
-        {
-            // Автоматически выбираем первый адаптер
-            auto adapters = window->packetInterceptor.GetAdapters();
-            if (!adapters.empty()) {
-                HWND comboBox = GetDlgItem(hwnd, IDC_ADAPTER_COMBO);
-                SendMessage(comboBox, CB_SETCURSEL, 0, 0);
-                window->selectedAdapterIp = adapters[0].address;
-                window->UpdateAdapterInfo();
-                EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
-                // PATCH: load packets for auto-selected adapter
-                window->LoadAdapterPackets(window->selectedAdapterIp);
-                if (window->adapterPackets.count(window->selectedAdapterIp) &&
-                    !window->adapterPackets[window->selectedAdapterIp].empty()) {
-                    window->groupedPackets = window->adapterPackets[window->selectedAdapterIp];
+            case WM_APP + 1: // Наше пользовательское сообщение для инициализации
+            {
+                // Автоматически выбираем первый адаптер
+                auto adapters = window->packetInterceptor.GetAdapters();
+                if (!adapters.empty()) {
+                    HWND comboBox = GetDlgItem(hwnd, IDC_ADAPTER_COMBO);
+                    SendMessage(comboBox, CB_SETCURSEL, 0, 0);
+                    window->selectedAdapterIp = adapters[0].address;
+                    window->UpdateAdapterInfo();
+                    EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
+                    // PATCH: load packets for auto-selected adapter
+                    window->LoadAdapterPackets(window->selectedAdapterIp);
+                    if (window->adapterPackets.count(window->selectedAdapterIp) &&
+                        !window->adapterPackets[window->selectedAdapterIp].empty()) {
+                        window->groupedPackets = window->adapterPackets[window->selectedAdapterIp];
+                    }
+                    else {
+                        window->groupedPackets.clear();
+                    }
+                    window->UpdateGroupedPackets();
                 }
-                else {
-                    window->groupedPackets.clear();
-                }
-                window->UpdateGroupedPackets();
-            }
-            return 0;
-        }
-        case WM_APP + 2:
-        {
-            OutputDebugStringA("WM_APP+2 received\n");
-            PacketInfo* packet = (PacketInfo*)lParam;
-            if (packet) {
-                window->OnPacketCaptured(*packet);
-                delete packet;
-            }
-            return 0;
-        }
-        case WM_CONTEXTMENU: {
-            window->OnContextMenu((HWND)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
-            return 0;
-        }
-        case WM_COMMAND:
-        {
-            int wmId = LOWORD(wParam);
-            int wmEvent = HIWORD(wParam);
-            if (LOWORD(wParam) >= CMD_PACKET_PROPERTIES &&
-                LOWORD(wParam) <= CMD_WHOIS_IP) {
-                window->OnPacketCommand(wParam);
                 return 0;
             }
-            switch (wmId) {
-            case IDC_SAVE_PACKETS:
-                if (wmEvent == BN_CLICKED) {
-                    window->SaveAdapterPackets(window->selectedAdapterIp);
+            case WM_APP + 2:
+            {
+                OutputDebugStringA("WM_APP+2 received\n");
+                PacketInfo* packet = (PacketInfo*)lParam;
+                if (packet) {
+                    window->OnPacketCaptured(*packet);
+                    delete packet;
+                }
+                return 0;
+            }
+            case WM_CONTEXTMENU: {
+                window->OnContextMenu((HWND)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+                return 0;
+            }
+            case WM_COMMAND:
+            {
+                int wmId = LOWORD(wParam);
+                int wmEvent = HIWORD(wParam);
+                if (LOWORD(wParam) >= CMD_PACKET_PROPERTIES &&
+                    LOWORD(wParam) <= CMD_WHOIS_IP) {
+                    window->OnPacketCommand(wParam);
                     return 0;
                 }
-                break;
-            case IDC_OPEN_RULES:
-                if (wmEvent == BN_CLICKED) {
-                    window->OpenRulesDialog();
-                    return 0;
-                }
-                break;
-            case IDC_OPEN_SETTINGS:
-                if (wmEvent == BN_CLICKED) {
-                    window->OpenSettingsDialog();
-                    return 0;
-                }
-                break;
-            case IDC_CLEAR_SAVED_PACKETS:
-                if (wmEvent == BN_CLICKED) {
-                    window->ClearSavedAdapterPackets(window->selectedAdapterIp);
-                    return 0;
-                }
-                break;
-            case IDC_START_CAPTURE:
-                if (wmEvent == BN_CLICKED) {
-                    window->OnStartCapture();
-                    return 0;  // Обработали сообщение
-                }
-                break;
+                switch (wmId) {
+                case IDC_SAVE_PACKETS:
+                    if (wmEvent == BN_CLICKED) {
+                        window->SaveAdapterPackets(window->selectedAdapterIp);
+                        return 0;
+                    }
+                    break;
+                case IDC_OPEN_RULES:
+                    if (wmEvent == BN_CLICKED) {
+                        window->OpenRulesDialog();
+                        return 0;
+                    }
+                    break;
+                case IDC_OPEN_SETTINGS:
+                    if (wmEvent == BN_CLICKED) {
+                        window->OpenSettingsDialog();
+                        return 0;
+                    }
+                    break;
+                case IDC_CLEAR_SAVED_PACKETS:
+                    if (wmEvent == BN_CLICKED) {
+                        window->ClearSavedAdapterPackets(window->selectedAdapterIp);
+                        return 0;
+                    }
+                    break;
+                case IDC_START_CAPTURE:
+                    if (wmEvent == BN_CLICKED) {
+                        window->OnStartCapture();
+                        return 0;  // Обработали сообщение
+                    }
+                    break;
 
-            case IDC_STOP_CAPTURE:
-                if (wmEvent == BN_CLICKED) {
+                case IDC_STOP_CAPTURE:
+                    if (wmEvent == BN_CLICKED) {
+                        window->OnStopCapture();
+                        return 0;  // Обработали сообщение
+                    }
+                    break;
+
+                case IDC_ADAPTER_COMBO:
+                    if (wmEvent == CBN_SELCHANGE) {
+                        window->OnAdapterSelected();
+                        return 0;  // Обработали сообщение
+                    }
+                    break;
+                }
+                break;
+            }
+            case WM_TIMER:
+                if (wParam == 1) {
+                    window->ProcessPacketBatch();
+                }
+                break;
+            case WM_CLOSE: {
+                if (window->isCapturing) {
                     window->OnStopCapture();
-                    return 0;  // Обработали сообщение
                 }
-                break;
+                DestroyWindow(hwnd);
+                return 0;
+            }
 
-            case IDC_ADAPTER_COMBO:
-                if (wmEvent == CBN_SELCHANGE) {
-                    window->OnAdapterSelected();
-                    return 0;  // Обработали сообщение
-                }
-                break;
+            case WM_DESTROY: {
+                KillTimer(hwnd, 1);
+                PostQuitMessage(0);
+                return 0;
             }
             break;
-        }
-        case WM_TIMER:
-            if (wParam == 1) {
-                window->ProcessPacketBatch();
             }
-            break;
-        case WM_CLOSE: {
-            if (window->isCapturing) {
-                window->OnStopCapture();
-            }
-            DestroyWindow(hwnd);
-            return 0;
         }
-
-        case WM_DESTROY: {
-            KillTimer(hwnd, 1);
-            PostQuitMessage(0);
-            return 0;
-        }
-        break;
-        }
+        
     }
-
+    catch (const std::exception& e) {
+        OutputDebugStringA("Exception in WndProc: ");
+        OutputDebugStringA(e.what());
+        OutputDebugStringA("\n");
+    }
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 

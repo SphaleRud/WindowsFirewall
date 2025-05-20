@@ -5,6 +5,9 @@
 #include <Windows.h>
 #include <algorithm>
 #include "rule.h"
+#include "firewall_types.h"
+#include "connection.h"
+#include <map>
 
 #define SIO_RCVALL _WSAIOW(IOC_VENDOR,1)
 #define RCVALL_ON 1
@@ -16,13 +19,6 @@ enum class ProtocolFilter
     TCP,
     UDP
 };
-
-// Добавляем enum для направления правил
-enum class RuleDirection {
-    Inbound,
-    Outbound
-};
-
 
 struct AppSettings
 {
@@ -80,24 +76,6 @@ struct icmp_header {
     unsigned short sequence;
 };
 
-
-// Структура для хранения информации о соединении
-struct Connection {
-    Protocol protocol;  // Теперь Protocol определен из rule.h
-    std::string sourceIp;
-    std::string destIp;
-    int sourcePort;
-    int destPort;
-    std::string appPath;
-
-    Connection()
-        : protocol(Protocol::ANY)
-        , sourcePort(0)
-        , destPort(0)
-    {
-    }
-};
-
 // Структура конфигурации
 struct Configuration {
     bool enabled;
@@ -143,11 +121,6 @@ struct LogEntry {
 struct NetworkAdapter {
     std::string name;
     std::string description;
-};
-
-enum class PacketDirection {
-    Incoming,
-    Outgoing
 };
 
 struct AdapterInfo {

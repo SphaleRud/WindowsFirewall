@@ -19,6 +19,16 @@ RuleManager& RuleManager::Instance() {
     return instance;
 }
 
+void RuleManager::SetDirection(RuleDirection direction) {
+    std::lock_guard<std::mutex> lock(ruleMutex);
+    currentDirection = direction;
+}
+
+RuleDirection RuleManager::GetCurrentDirection() const {
+    std::lock_guard<std::mutex> lock(ruleMutex);
+    return currentDirection;
+}
+
 bool RuleManager::AddRule(const Rule& rule) {
     std::lock_guard<std::mutex> lock(ruleMutex);
     Rule newRule = rule;
@@ -60,79 +70,6 @@ std::optional<Rule> RuleManager::GetRuleById(int ruleId) const {
     return std::nullopt;
 }
 
-// В RuleManager добавим метод для валидации ввода
-bool RuleValidator::ValidatePortInput(const std::wstring& input, std::vector<std::pair<int, int>>& portRanges) {
-    std::wstring port = input;
-    std::vector<std::wstring> parts;
-
-    // Разделяем по запятой
-    size_t pos = 0;
-    while ((pos = port.find(L',')) != std::wstring::npos) {
-        parts.push_back(port.substr(0, pos));
-        port = port.substr(pos + 1);
-    }
-    parts.push_back(port);
-
-    for (const auto& part : parts) {
-        // Проверяем на диапазон
-        if (part.find(L'-') != std::wstring::npos) {
-            size_t dashPos = part.find(L'-');
-            int start = _wtoi(part.substr(0, dashPos).c_str());
-            int end = _wtoi(part.substr(dashPos + 1).c_str());
-
-            if (start <= 0 || end <= 0 || start > 65535 || end > 65535 || start > end)
-                return false;
-
-            portRanges.push_back({ start, end });
-        }
-        else {
-            // Одиночный порт
-            int singlePort = _wtoi(part.c_str());
-            if (singlePort <= 0 || singlePort > 65535)
-                return false;
-
-            portRanges.push_back({ singlePort, singlePort });
-        }
-    }
-    return true;
-}
-
-bool RuleValidator::ValidateIpInput(const std::wstring& input, std::vector<std::pair<std::string, std::string>>& ipRanges) {
-    std::wstring ip = input;
-    std::vector<std::wstring> parts;
-
-    // Разделяем по запятой
-    size_t pos = 0;
-    while ((pos = ip.find(L',')) != std::wstring::npos) {
-        parts.push_back(ip.substr(0, pos));
-        ip = ip.substr(pos + 1);
-    }
-    parts.push_back(ip);
-
-    for (const auto& part : parts) {
-        // Проверяем на CIDR нотацию
-        if (part.find(L'/') != std::wstring::npos) {
-            // Реализовать проверку CIDR
-            continue;
-        }
-
-        // Проверяем на диапазон
-        if (part.find(L'-') != std::wstring::npos) {
-            size_t dashPos = part.find(L'-');
-            std::string start = WideToUtf8(part.substr(0, dashPos).c_str());
-            std::string end = WideToUtf8(part.substr(dashPos + 1).c_str());
-
-            // Здесь нужно добавить проверку корректности IP адресов
-            ipRanges.push_back({ start, end });
-        }
-        else {
-            std::string single = WideToUtf8(part.c_str());
-            // Здесь нужно добавить проверку корректности IP адреса
-            ipRanges.push_back({ single, single });
-        }
-    }
-    return true;
-}
 
 bool RuleManager::IsAllowed(const Connection& connection, int& matchedRuleId) {
     std::lock_guard<std::mutex> lock(ruleMutex);
@@ -178,40 +115,104 @@ void RuleManager::ShowRulesDialog(HWND hParent) {
     );
 }
 
-static void FillRulesList(HWND hList) {
+void FillRulesList(HWND hList) {
     ListView_DeleteAllItems(hList);
+
+    // Удаляем все колонки
+    while (ListView_DeleteColumn(hList, 0)) {}
+
+    // Добавляем колонки
+    LVCOLUMN lvc = { 0 };
+    lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+
+    const struct {
+        const wchar_t* text;
+        int width;
+    } columns[] = {
+        { L"Название", 150 },
+        { L"Состояние", 70 },
+        { L"Действие", 70 },
+        { L"Программа", 150 },
+        { L"Локальный адрес", 120 },
+        { L"Адрес назначения", 120 },
+        { L"Протокол", 70 },
+        { L"Локальный порт", 100 },
+        { L"Порт назначения", 100 }
+    };
+
+    for (int i = 0; i < _countof(columns); i++) {
+        lvc.iSubItem = i;
+        lvc.pszText = const_cast<LPWSTR>(columns[i].text);
+        lvc.cx = columns[i].width;
+        ListView_InsertColumn(hList, i, &lvc);
+    }
+
+    // Получаем правила и текущее направление
     auto rules = RuleManager::Instance().GetRules();
     auto currentDirection = RuleManager::Instance().GetCurrentDirection();
 
-    for (const Rule& rule : rules) {
+    int itemIndex = 0;
+    for (const auto& rule : rules) {
         if (rule.direction != currentDirection)
             continue;
 
         LVITEM lvi = { 0 };
         lvi.mask = LVIF_TEXT;
-        lvi.iItem = ListView_GetItemCount(hList);
+        lvi.iItem = itemIndex;
 
-        std::wstring proto = (rule.protocol == Protocol::TCP) ? L"TCP" :
-            (rule.protocol == Protocol::UDP) ? L"UDP" :
-            (rule.protocol == Protocol::ICMP) ? L"ICMP" :
-            (rule.protocol == Protocol::ANY) ? L"ANY" : L"?";
-        std::wstring src = Utf8ToWide(rule.sourceIp);
-        std::wstring dst = Utf8ToWide(rule.destIp);
-        std::wstring act = (rule.action == RuleAction::ALLOW) ? L"Allow" : L"Block";
-        std::wstring name = Utf8ToWide(rule.name);
-        std::wstring descr = Utf8ToWide(rule.description);
-        std::wstring enabled = rule.enabled ? L"Yes" : L"No";
-
+        // Название
         lvi.iSubItem = 0;
-        lvi.pszText = const_cast<LPWSTR>(proto.c_str());
-        int idx = ListView_InsertItem(hList, &lvi);
+        lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.name).c_str());
+        ListView_InsertItem(hList, &lvi);
 
-        ListView_SetItemText(hList, idx, 1, const_cast<LPWSTR>(src.c_str()));
-        ListView_SetItemText(hList, idx, 2, const_cast<LPWSTR>(dst.c_str()));
-        ListView_SetItemText(hList, idx, 3, const_cast<LPWSTR>(act.c_str()));
-        ListView_SetItemText(hList, idx, 4, const_cast<LPWSTR>(name.c_str()));
-        ListView_SetItemText(hList, idx, 5, const_cast<LPWSTR>(descr.c_str()));
-        ListView_SetItemText(hList, idx, 6, const_cast<LPWSTR>(enabled.c_str()));
+        // Состояние
+        lvi.iSubItem = 1;
+        lvi.pszText = const_cast<LPWSTR>(rule.enabled ? L"Вкл" : L"Выкл");
+        ListView_SetItem(hList, &lvi);
+
+        // Действие
+        lvi.iSubItem = 2;
+        lvi.pszText = const_cast<LPWSTR>(rule.action == RuleAction::ALLOW ? L"Разрешить" : L"Запретить");
+        ListView_SetItem(hList, &lvi);
+
+        // Программа
+        lvi.iSubItem = 3;
+        lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.appPath).c_str());
+        ListView_SetItem(hList, &lvi);
+
+        // Локальный адрес
+        lvi.iSubItem = 4;
+        lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.sourceIp).c_str());
+        ListView_SetItem(hList, &lvi);
+
+        // Адрес назначения
+        lvi.iSubItem = 5;
+        lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.destIp).c_str());
+        ListView_SetItem(hList, &lvi);
+
+        // Протокол
+        lvi.iSubItem = 6;
+        std::wstring protocolStr;
+        switch (rule.protocol) {
+        case Protocol::TCP: protocolStr = L"TCP"; break;
+        case Protocol::UDP: protocolStr = L"UDP"; break;
+        case Protocol::ICMP: protocolStr = L"ICMP"; break;
+        default: protocolStr = L"Любой"; break;
+        }
+        lvi.pszText = const_cast<LPWSTR>(protocolStr.c_str());
+        ListView_SetItem(hList, &lvi);
+
+        // Локальный порт
+        lvi.iSubItem = 7;
+        lvi.pszText = const_cast<LPWSTR>(std::to_wstring(rule.sourcePort).c_str());
+        ListView_SetItem(hList, &lvi);
+
+        // Порт назначения
+        lvi.iSubItem = 8;
+        lvi.pszText = const_cast<LPWSTR>(std::to_wstring(rule.destPort).c_str());
+        ListView_SetItem(hList, &lvi);
+
+        itemIndex++;
     }
 }
 

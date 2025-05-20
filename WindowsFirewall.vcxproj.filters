@@ -75,6 +75,12 @@
     <ClInclude Include="validator.h">
       <Filter>Header Files\Utils</Filter>
     </ClInclude>
+    <ClInclude Include="firewall_types.h">
+      <Filter>Header Files\Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="connection.h">
+      <Filter>Header Files\Utils</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="WindowsFirewall.cpp">

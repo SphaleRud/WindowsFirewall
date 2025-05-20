@@ -5,6 +5,8 @@
 #include "string_utils.h" 
 #include <vector>
 #include "validator.h"
+#include <windowsx.h>
+#include <shlwapi.h>
 
 RuleWizard* RuleWizard::s_instance = nullptr;
 
@@ -24,10 +26,29 @@ RuleWizard::~RuleWizard()
     s_instance = nullptr;
 }
 
-bool RuleWizard::ShowWizard(HWND hParent, Rule& rule)
-{
-    RuleWizard wizard(hParent, rule);
-    return wizard.Show();
+Rule* RuleWizard::currentRule = nullptr;
+bool RuleWizard::isEditMode = false;
+
+bool RuleWizard::ShowWizard(HWND parent, Rule& rule) {
+    currentRule = &rule;
+    isEditMode = false;
+    return DialogBox(
+        GetModuleHandle(NULL),
+        MAKEINTRESOURCE(IDD_RULE_EDIT),
+        parent,
+        DialogProc
+    ) == IDOK;
+}
+
+bool RuleWizard::EditRule(HWND parent, Rule& rule) {
+    currentRule = &rule;
+    isEditMode = true;
+    return DialogBox(
+        GetModuleHandle(NULL),
+        MAKEINTRESOURCE(IDD_RULE_EDIT),
+        parent,
+        DialogProc
+    ) == IDOK;
 }
 
 bool RuleWizard::Show()
@@ -37,6 +58,264 @@ bool RuleWizard::Show()
         m_hwndParent,
         MainDlgProc,
         reinterpret_cast<LPARAM>(this)) == IDOK;
+}
+
+void RuleWizard::InitDialog(HWND hwnd) {
+    // Инициализация комбобокса протоколов
+    HWND hProtocol = GetDlgItem(hwnd, IDC_COMBO_PROTOCOL);
+    ComboBox_AddString(hProtocol, L"Любой");
+    ComboBox_AddString(hProtocol, L"TCP");
+    ComboBox_AddString(hProtocol, L"UDP");
+    ComboBox_AddString(hProtocol, L"ICMP");
+    ComboBox_SetCurSel(hProtocol, 0);
+
+    // Установка текущего времени UTC в формате YYYY-MM-DD HH:MM:SS
+    time_t now;
+    time(&now);
+    tm utc_tm;
+    gmtime_s(&utc_tm, &now);
+    wchar_t timeStr[64];
+    swprintf_s(timeStr, L"%04d-%02d-%02d %02d:%02d:%02d",
+        utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday,
+        utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
+    SetDlgItemText(hwnd, IDC_EDIT_NAME, timeStr);
+
+    // Инициализация чекбоксов
+    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_IP), BST_CHECKED);
+    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_IP), BST_CHECKED);
+    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_PORT), BST_CHECKED);
+    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_PORT), BST_CHECKED);
+
+    // Отключаем поля ввода по умолчанию
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_IP), FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_IP), FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_PORT), FALSE);
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_PORT), FALSE);
+
+    // По умолчанию выбираем "Разрешить"
+    CheckRadioButton(hwnd, IDC_RADIO_ALLOW, IDC_RADIO_BLOCK, IDC_RADIO_ALLOW);
+
+    if (isEditMode && currentRule) {
+        LoadRule(hwnd);
+    }
+}
+
+void RuleWizard::LoadRule(HWND hwnd) {
+    if (!currentRule) return;
+
+    // Загружаем данные правила
+    SetDlgItemText(hwnd, IDC_EDIT_NAME, Utf8ToWide(currentRule->name).c_str());
+    SetDlgItemText(hwnd, IDC_EDIT_PROGRAM, Utf8ToWide(currentRule->appPath).c_str());
+
+    // Действие
+    CheckRadioButton(hwnd, IDC_RADIO_ALLOW, IDC_RADIO_BLOCK,
+        currentRule->action == RuleAction::ALLOW ? IDC_RADIO_ALLOW : IDC_RADIO_BLOCK);
+
+    // Протокол
+    HWND hProtocol = GetDlgItem(hwnd, IDC_COMBO_PROTOCOL);
+    int protocolIndex = static_cast<int>(currentRule->protocol);
+    ComboBox_SetCurSel(hProtocol, protocolIndex);
+
+    // IP адреса
+    bool anyLocalIp = (currentRule->sourceIp == "0.0.0.0" || currentRule->sourceIp.empty());
+    bool anyRemoteIp = (currentRule->destIp == "0.0.0.0" || currentRule->destIp.empty());
+
+    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_IP), anyLocalIp ? BST_CHECKED : BST_UNCHECKED);
+    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_IP), anyRemoteIp ? BST_CHECKED : BST_UNCHECKED);
+
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_IP), !anyLocalIp);
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_IP), !anyRemoteIp);
+
+    if (!anyLocalIp) {
+        SetDlgItemText(hwnd, IDC_EDIT_LOCAL_IP, Utf8ToWide(currentRule->sourceIp).c_str());
+    }
+    if (!anyRemoteIp) {
+        SetDlgItemText(hwnd, IDC_EDIT_REMOTE_IP, Utf8ToWide(currentRule->destIp).c_str());
+    }
+
+    // Порты
+    bool anyLocalPort = (currentRule->sourcePort == 0);
+    bool anyRemotePort = (currentRule->destPort == 0);
+
+    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_PORT), anyLocalPort ? BST_CHECKED : BST_UNCHECKED);
+    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_PORT), anyRemotePort ? BST_CHECKED : BST_UNCHECKED);
+
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_PORT), !anyLocalPort);
+    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_PORT), !anyRemotePort);
+
+    if (!anyLocalPort) {
+        SetDlgItemText(hwnd, IDC_EDIT_LOCAL_PORT, std::to_wstring(currentRule->sourcePort).c_str());
+    }
+    if (!anyRemotePort) {
+        SetDlgItemText(hwnd, IDC_EDIT_REMOTE_PORT, std::to_wstring(currentRule->destPort).c_str());
+    }
+}
+
+bool RuleWizard::SaveRule(HWND hwnd) {
+    if (!currentRule) return false;
+
+    std::wstring errorMsg;
+    if (!RuleValidator::ValidateInputs(hwnd, errorMsg)) {
+        MessageBox(hwnd, errorMsg.c_str(), L"Ошибка", MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    wchar_t buffer[MAX_PATH];
+
+    // Название
+    GetDlgItemText(hwnd, IDC_EDIT_NAME, buffer, MAX_PATH);
+    currentRule->name = WideToUtf8(buffer);
+
+    // Путь к программе
+    GetDlgItemText(hwnd, IDC_EDIT_PROGRAM, buffer, MAX_PATH);
+    currentRule->appPath = WideToUtf8(buffer);
+
+    // Действие
+    currentRule->action = IsDlgButtonChecked(hwnd, IDC_RADIO_ALLOW) == BST_CHECKED ?
+        RuleAction::ALLOW : RuleAction::BLOCK;
+
+    // Протокол
+    int protocolIndex = ComboBox_GetCurSel(GetDlgItem(hwnd, IDC_COMBO_PROTOCOL));
+    currentRule->protocol = static_cast<Protocol>(protocolIndex);
+
+    // IP адреса
+    if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_LOCAL_IP) == BST_CHECKED) {
+        currentRule->sourceIp = "0.0.0.0";
+    }
+    else {
+        GetDlgItemText(hwnd, IDC_EDIT_LOCAL_IP, buffer, MAX_PATH);
+        currentRule->sourceIp = WideToUtf8(buffer);
+    }
+
+    if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_REMOTE_IP) == BST_CHECKED) {
+        currentRule->destIp = "0.0.0.0";
+    }
+    else {
+        GetDlgItemText(hwnd, IDC_EDIT_REMOTE_IP, buffer, MAX_PATH);
+        currentRule->destIp = WideToUtf8(buffer);
+    }
+
+    // Порты
+    if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_LOCAL_PORT) == BST_CHECKED) {
+        currentRule->sourcePort = 0;
+    }
+    else {
+        GetDlgItemText(hwnd, IDC_EDIT_LOCAL_PORT, buffer, MAX_PATH);
+        currentRule->sourcePort = _wtoi(buffer);
+    }
+
+    if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_REMOTE_PORT) == BST_CHECKED) {
+        currentRule->destPort = 0;
+    }
+    else {
+        GetDlgItemText(hwnd, IDC_EDIT_REMOTE_PORT, buffer, MAX_PATH);
+        currentRule->destPort = _wtoi(buffer);
+    }
+
+    // Создатель правила
+    currentRule->creator = "BlackBruceLee576"; // текущий пользователь
+
+    // Время создания
+    time_t now;
+    time(&now);
+    tm utc_tm;
+    gmtime_s(&utc_tm, &now);
+    char timeStr[64];
+    sprintf_s(timeStr, "%04d-%02d-%02d %02d:%02d:%02d",
+        utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday,
+        utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
+    currentRule->creationTime = timeStr;
+
+    return true;
+}
+
+void RuleWizard::BrowseForProgram(HWND hwnd) {
+    wchar_t filePath[MAX_PATH] = { 0 };
+
+    // Настраиваем диалог выбора файла
+    OPENFILENAME ofn = { 0 };
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = L"Executable Files (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = filePath;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+    ofn.lpstrDefExt = L"exe";
+
+    if (GetOpenFileName(&ofn)) {
+        SetDlgItemText(hwnd, IDC_EDIT_PROGRAM, filePath);
+    }
+}
+
+INT_PTR CALLBACK RuleWizard::DialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_INITDIALOG:
+        InitDialog(hwnd);
+        s_instance->m_hwndMain = hwnd;
+        s_instance->ShowPage(PAGE_TYPE);
+        return TRUE;
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDC_CHECK_ANY_LOCAL_IP:
+            if (HIWORD(wParam) == BN_CLICKED) {
+                bool isChecked = (Button_GetCheck((HWND)lParam) == BST_CHECKED);
+                EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_IP), !isChecked);
+                if (isChecked) {
+                    SetDlgItemText(hwnd, IDC_EDIT_LOCAL_IP, L"");
+                }
+            }
+            return TRUE;
+
+        case IDC_CHECK_ANY_REMOTE_IP:
+            if (HIWORD(wParam) == BN_CLICKED) {
+                bool isChecked = (Button_GetCheck((HWND)lParam) == BST_CHECKED);
+                EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_IP), !isChecked);
+                if (isChecked) {
+                    SetDlgItemText(hwnd, IDC_EDIT_REMOTE_IP, L"");
+                }
+            }
+            return TRUE;
+
+        case IDC_CHECK_ANY_LOCAL_PORT:
+            if (HIWORD(wParam) == BN_CLICKED) {
+                bool isChecked = (Button_GetCheck((HWND)lParam) == BST_CHECKED);
+                EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_PORT), !isChecked);
+                if (isChecked) {
+                    SetDlgItemText(hwnd, IDC_EDIT_LOCAL_PORT, L"");
+                }
+            }
+            return TRUE;
+
+        case IDC_CHECK_ANY_REMOTE_PORT:
+            if (HIWORD(wParam) == BN_CLICKED) {
+                bool isChecked = (Button_GetCheck((HWND)lParam) == BST_CHECKED);
+                EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_PORT), !isChecked);
+                if (isChecked) {
+                    SetDlgItemText(hwnd, IDC_EDIT_REMOTE_PORT, L"");
+                }
+            }
+            return TRUE;
+
+        case IDC_BROWSE_PROGRAM:
+            if (HIWORD(wParam) == BN_CLICKED) {
+                BrowseForProgram(hwnd);
+            }
+            return TRUE;
+
+        case IDOK:
+            if (SaveRule(hwnd)) {
+                EndDialog(hwnd, IDOK);
+            }
+            return TRUE;
+
+        case IDCANCEL:
+            EndDialog(hwnd, IDCANCEL);
+            return TRUE;
+        }
+        break;
+    }
+    return FALSE;
 }
 
 void RuleWizard::ShowPage(WizardPage page)

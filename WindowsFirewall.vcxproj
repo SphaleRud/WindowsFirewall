@@ -132,6 +132,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="connection.h" />
+    <ClInclude Include="firewall_types.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="listview.h" />
     <ClInclude Include="logger.h" />

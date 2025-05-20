@@ -2,7 +2,14 @@
 // Microsoft Visual C++ generated include file.
 // Used by WindowsFirewall.rc
 //
-#define IDC_MYICON                      2
+#ifndef IDOK
+#define IDOK                            1
+#endif
+#ifndef IDCANCEL
+#define IDCANCEL                        2
+#endif
+
+#define IDC_MYICON                      3
 #define IDD_ADAPTER_DIALOG              101
 #define IDD_WINDOWSFIREWALL_DIALOG      102
 #define IDS_APP_TITLE                   103
@@ -47,6 +54,34 @@
 #define IDC_RULES_LIST                  4001
 #define ID_ADD_RULE                     4002
 #define ID_DELETE_RULE                  4003
+#define IDD_RULE_WIZARD_DIALOG			4010
+#define IDC_WIZARD_STEP_TYPE			4011
+#define IDC_WIZARD_STEP_PARAMS			4012
+#define IDC_WIZARD_STEP_ACTION			4013
+#define IDC_WIZARD_STEP_NAME			4014
+#define IDC_RULE_TYPE_COMBO				4015
+#define IDC_PROTOCOL_COMBO				4016
+#define IDC_WIZARD_NEXT					4017
+#define IDC_RULE_PARAM_APP				4018
+#define IDC_RULE_PARAM_PORT				4019
+#define IDC_RULE_PARAM_PROTO			4020
+#define IDC_RULE_ALLOW_RADIO			4021
+#define IDC_RULE_BLOCK_RADIO			4022
+#define IDC_APP_PATH_EDIT				4023
+#define IDC_PORT_EDIT					4024
+#define IDC_RULE_NAME_EDIT				4025
+#define IDC_RULE_DESC_EDIT				4026
+#define IDC_WIZARD_BACK					4027
+#define IDC_BROWSE_APP					4028
+#define IDC_RULE_PARAM_ADVANCED			4029
+#define IDC_ADV_PROTO_COMBO			    4030
+#define IDC_ADV_SRC_PORT_EDIT			4031
+#define IDC_ADV_DST_PORT_EDIT			4032
+#define IDC_ADV_SRC_IP_EDIT				4033
+#define IDC_ADV_DST_IP_EDIT				4034
+#define IDC_ADV_APP_PATH_EDIT			4035
+#define IDC_ADV_BROWSE_APP				4036
+
 
 #define IDI_ICON_PLAY					5001
 #define IDI_ICON_STOP					5002

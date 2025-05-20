@@ -1356,11 +1356,6 @@ void MainWindow::ShowPacketProperties(int itemIndex) {
         reinterpret_cast<LPARAM>(&packet));
 }
 
-void MainWindow::OpenRulesDialog() {
-    MessageBox(hwnd, L"Окно с правилами будет реализовано.", L"Правила", MB_OK | MB_ICONINFORMATION);
-    // Здесь можно вызвать диалог или открыть отдельное окно с правилами
-}
-
 void MainWindow::OnAdapterSelected() {
     if (!selectedAdapterIp.empty()) {
         adapterPackets[selectedAdapterIp] = groupedPackets;
@@ -1705,21 +1700,6 @@ void MainWindow::Show(int nCmdShow) {
             UpdateAdapterInfo();
         }
     }
-}
-
-
-void MainWindow::UpdateRulesList() {
-    // TODO: Обновить список правил
-}
-
-void MainWindow::UpdateConnectionsList() {
-    // TODO: Обновить список соединений
-}
-
-void MainWindow::AddRule() {
-    // TODO: Добавить реализацию
-    MessageBox(hwnd, L"Add Rule functionality will be implemented soon",
-        L"Not Implemented", MB_OK | MB_ICONINFORMATION);
 }
 
 void MainWindow::DeleteRule() {

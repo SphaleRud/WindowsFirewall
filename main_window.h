@@ -20,8 +20,6 @@ public:
     enum ControlIds {
         ID_START_CAPTURE = 1503,
         ID_STOP_CAPTURE = 1504,
-        ID_ADD_RULE = 1505,
-        ID_DELETE_RULE = 1506,
         ID_SAVE_PACKETS = 1501,
         ID_CLEAR_SAVED_PACKETS = 1502
     };

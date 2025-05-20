@@ -95,6 +95,7 @@ struct Rule {
     uint16_t destPort;
     Protocol protocol;
     RuleAction action;
+    std::string appPath;
     bool enabled;
     std::string description;
 };

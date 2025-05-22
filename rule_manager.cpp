@@ -231,12 +231,7 @@ static void DeleteSelectedRule(HWND hList) {
 
 bool RuleManager::ShowAddRuleWizard(HWND hParent) {
     Rule newRule;
-    newRule.direction = GetCurrentDirection();
-    if (RuleWizard::ShowWizard(hParent, newRule)) {
-        AddRule(newRule);
-        return true;
-    }
-    return false;
+    return RuleWizard::ShowWizard(hParent, newRule);
 }
 
 // Остальные методы класса RuleManager (AddRule, RemoveRule и т.д.) остаются без изменений

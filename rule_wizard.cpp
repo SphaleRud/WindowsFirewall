@@ -37,7 +37,7 @@ bool RuleWizard::ShowWizard(HWND parent, Rule& rule) {
     isEditMode = false;
     return DialogBox(
         GetModuleHandle(NULL),
-        MAKEINTRESOURCE(IDD_RULE_EDIT),
+        MAKEINTRESOURCE(IDD_RULE_WIZARD),
         parent,
         DialogProc
     ) == IDOK;
@@ -48,7 +48,7 @@ bool RuleWizard::EditRule(HWND parent, Rule& rule) {
     isEditMode = true;
     return DialogBox(
         GetModuleHandle(NULL),
-        MAKEINTRESOURCE(IDD_RULE_EDIT),
+        MAKEINTRESOURCE(IDD_RULE_WIZARD),
         parent,
         DialogProc
     ) == IDOK;
@@ -245,7 +245,7 @@ INT_PTR CALLBACK RuleWizard::DialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
     switch (msg) {
     case WM_INITDIALOG:
         InitDialog(hwnd);
-        ShowPage(hwnd, IDD_RULE_PAGE_TYPE);
+        ShowPage(hwnd, PAGE_TYPE);
         return TRUE;
 
     case WM_COMMAND:
@@ -472,45 +472,98 @@ bool RuleWizard::SavePageData() {
     }
 }
 
-void RuleWizard::ShowPage(HWND hwnd, WizardPage page) {
-    // Сохраняем данные текущей страницы
+void RuleWizard::ShowPage(WizardPage page) {
+    OutputDebugString(L"ShowPage: Starting\n");
+
     if (!SavePageData()) {
+        OutputDebugString(L"ShowPage: SavePageData failed\n");
         return;
     }
 
-    currentPage = page;
+    if (m_hwndCurrent) {
+        DestroyWindow(m_hwndCurrent);
+        m_hwndCurrent = NULL;
+    }
 
-    // Скрываем все элементы управления
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_NAME), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_PROGRAM), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_BROWSE_PROGRAM), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_RADIO_ALLOW), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_RADIO_BLOCK), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_IP), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_IP), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_IP), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_IP), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_COMBO_PROTOCOL), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_PORT), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_PORT), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_PORT), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_PORT), FALSE);
+    m_currentPage = page;
 
-    // Показываем элементы в зависимости от страницы
-    SetupPageControls(hwnd);
+    // Создаем новую страницу
+    OutputDebugString(L"ShowPage: Creating page dialog\n");
+    m_hwndCurrent = CreateDialog(
+        GetModuleHandle(NULL),
+        MAKEINTRESOURCE(GetPageDialogId(page)),
+        m_hwndMain,
+        PageDlgProc
+    );
 
-    // Обновляем кнопки Назад/Далее
-    UpdateButtons(hwnd);
+    if (!m_hwndCurrent) {
+        DWORD error = GetLastError();
+        wchar_t msg[256];
+        swprintf_s(msg, L"Failed to create page dialog. Error: %d", error);
+        OutputDebugString(msg);
+        MessageBox(m_hwndMain, msg, L"Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    OutputDebugString(L"ShowPage: Page dialog created successfully\n");
+
+    // Размещаем страницу в контейнере
+    HWND container = GetDlgItem(m_hwndMain, IDC_PAGE_CONTAINER);
+    if (!container) {
+        OutputDebugString(L"ShowPage: Container not found\n");
+        MessageBox(m_hwndMain, L"Container not found", L"Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    RECT rc;
+    GetClientRect(container, &rc);
+    SetWindowPos(m_hwndCurrent, NULL,
+        rc.left, rc.top,
+        rc.right - rc.left, rc.bottom - rc.top,
+        SWP_NOZORDER);
+
+    // Инициализируем элементы управления
+    if (page == PAGE_TYPE) {
+        HWND combo = GetDlgItem(m_hwndCurrent, IDC_RULE_TYPE_COMBO);
+        if (combo) {
+            ComboBox_AddString(combo, L"По приложению");
+            ComboBox_AddString(combo, L"По порту");
+            ComboBox_AddString(combo, L"По протоколу");
+            ComboBox_AddString(combo, L"Расширенное");
+            ComboBox_SetCurSel(combo, m_selectedType);
+            OutputDebugString(L"ShowPage: ComboBox initialized\n");
+        }
+        else {
+            OutputDebugString(L"ShowPage: Failed to get ComboBox handle\n");
+        }
+    }
+
+    ShowWindow(m_hwndCurrent, SW_SHOW);
+    UpdateButtons();
+    OutputDebugString(L"ShowPage: Completed\n");
+}
+
+// Вспомогательный метод для получения ID диалога страницы
+int RuleWizard::GetPageDialogId(WizardPage page) {
+    switch (page) {
+    case PAGE_TYPE: return IDD_RULE_PAGE_TYPE;
+    case PAGE_PARAMS_APP: return IDD_RULE_PAGE_APP;
+    case PAGE_PARAMS_PORT: return IDD_RULE_PAGE_PORT;
+    case PAGE_PARAMS_PROTO: return IDD_RULE_PARAM_PROTO;
+    case PAGE_PARAMS_ADVANCED: return IDD_RULE_PARAM_ADVANCED;
+    case PAGE_ACTION: return IDD_RULE_PAGE_ACTION;
+    case PAGE_NAME: return IDD_RULE_PAGE_NAME;
+    default: return 0;
+    }
 }
 
 
 
-void RuleWizard::UpdateButtons(HWND hwnd) {
+void RuleWizard::UpdateButtons() {
     // Кнопка "Назад" активна везде, кроме первой страницы
-    EnableWindow(GetDlgItem(hwnd, IDC_WIZARD_BACK), currentPage > PAGE_TYPE);
+    EnableWindow(GetDlgItem(m_hwndMain, IDC_WIZARD_BACK), m_currentPage > PAGE_TYPE);
 
     // На последней странице меняем текст кнопки "Далее" на "Готово"
-    SetDlgItemText(hwnd, IDC_WIZARD_NEXT,
-        currentPage == PAGE_NAME ? L"Готово" : L"Далее >");
+    SetDlgItemText(m_hwndMain, IDC_WIZARD_NEXT,
+        m_currentPage == PAGE_NAME ? L"Готово" : L"Далее >");
 }
-

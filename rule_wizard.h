@@ -23,9 +23,9 @@ private:
     RuleWizard(HWND hParent, Rule& rule);
     ~RuleWizard();
     
-    static void ShowPage(HWND hwnd, WizardPage page);
-    static void UpdateButtons(HWND hwnd);
-    static void SetupPageControls(HWND hwnd);
+    static void ShowPage(WizardPage page);
+    static void UpdateButtons();
+    static void SetupPageControls();
 
     static Rule* currentRule;
     static bool isEditMode;
@@ -34,12 +34,13 @@ private:
     static HWND currentPageHwnd;
 
     static INT_PTR CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-    static void InitDialog(HWND hwnd);
-    static void LoadRule(HWND hwnd);
-    static bool SaveRule(HWND hwnd);
+    static void InitDialog();
+    static void LoadRule();
+    static bool SaveRule();
     static bool ValidateCurrentPage();
-    static void BrowseForProgram(HWND hwnd);
+    static void BrowseForProgram();
     static bool SavePageData();
+    static int GetPageDialogId(WizardPage page);
     static INT_PTR CALLBACK PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
     static RuleWizard* s_instance;

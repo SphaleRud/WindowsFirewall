@@ -38,6 +38,8 @@ public:
     void ResetRuleIdCounter(int newNextId = 1);
     void ShowRulesDialog(HWND hParent);
 
+    bool SaveRulesToFile(const std::wstring& path = L"rules.json") const;
+    bool LoadRulesFromFile(const std::wstring& path = L"rules.json");
 private:
     static INT_PTR CALLBACK RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 };

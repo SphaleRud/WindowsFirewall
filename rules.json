@@ -1,0 +1,16 @@
+[
+  {
+    "action": "ALLOW",
+    "appPath": "E:\\Programs\\AIDA64-Extreme\\aida64.exe",
+    "description": "",
+    "destIp": "",
+    "destPort": 0,
+    "direction": "Inbound",
+    "enabled": true,
+    "id": 1,
+    "name": "Test",
+    "protocol": "ANY",
+    "sourceIp": "",
+    "sourcePort": 0
+  }
+]

@@ -32,12 +32,13 @@ bool RuleWizard::Show() {
     );
     if (res == IDOK) {
         // Копируем данные из черновика в исходную Rule
-        m_ruleDraft = m_ruleDraft;
+        //m_ruleDraft = m_ruleDraft;
         return true;
     }
     return false;
 }
 
+/*
 bool RuleWizard::SaveRule(HWND hwnd) {
     if (!hwnd) return false;
 
@@ -129,8 +130,11 @@ bool RuleWizard::SaveRule(HWND hwnd) {
 
     return true;
 }
+*/
 
 void RuleWizard::BrowseForProgram(HWND hwnd, int editId) {
+    wchar_t oldDir[MAX_PATH];
+    GetCurrentDirectoryW(MAX_PATH, oldDir);
     wchar_t filePath[MAX_PATH] = { 0 };
     OPENFILENAME ofn = { 0 };
     ofn.lStructSize = sizeof(ofn);
@@ -143,6 +147,7 @@ void RuleWizard::BrowseForProgram(HWND hwnd, int editId) {
     if (GetOpenFileName(&ofn)) {
         SetDlgItemText(hwnd, editId, filePath);
     }
+    SetCurrentDirectoryW(oldDir);
 }
 
 
@@ -164,11 +169,13 @@ INT_PTR CALLBACK RuleWizard::DialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case IDC_WIZARD_NEXT:
-            if (!self->ValidateCurrentPage()) return TRUE;
+            if (!self->ValidateCurrentPage())
+                return TRUE;
+            if (!self->ApplyPageData())
+                return TRUE;
             if (self->m_currentPage == PAGE_NAME) {
-                if (self->ApplyPageData() && self->SaveRule(self->m_hwndCurrent)) {
-                    EndDialog(hwnd, IDOK);
-                }
+                // На последней странице данные уже сохранены через ApplyPageData
+                EndDialog(hwnd, IDOK);
             }
             else {
                 self->GoToNextPage();
@@ -309,16 +316,99 @@ bool RuleWizard::ApplyPageData() {
         GetDlgItemText(m_hwndCurrent, IDC_PORT_EDIT, buffer, MAX_PATH);
         m_ruleDraft.sourcePort = _wtoi(buffer);
         break;
+    case PAGE_PARAMS_PROTO: {
+        // Протокол
+        int protoIdx = ComboBox_GetCurSel(GetDlgItem(m_hwndCurrent, IDC_PROTOCOL_COMBO));
+        m_ruleDraft.protocol = protoIdx == CB_ERR ? Protocol::ANY : static_cast<Protocol>(protoIdx);
+
+        // Локальный порт
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_PORT) == BST_CHECKED) {
+            m_ruleDraft.sourcePort = 0;
+        }
+        else {
+            GetDlgItemText(m_hwndCurrent, IDC_EDIT_LOCAL_PORT, buffer, MAX_PATH);
+            m_ruleDraft.sourcePort = wcslen(buffer) ? _wtoi(buffer) : 0;
+        }
+
+        // Порт назначения
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_PORT) == BST_CHECKED) {
+            m_ruleDraft.destPort = 0;
+        }
+        else {
+            GetDlgItemText(m_hwndCurrent, IDC_EDIT_REMOTE_PORT, buffer, MAX_PATH);
+            m_ruleDraft.destPort = wcslen(buffer) ? _wtoi(buffer) : 0;
+        }
+
+        // Локальный IP
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_IP) == BST_CHECKED) {
+            m_ruleDraft.sourceIp = "Любые";
+        }
+        else {
+            GetDlgItemText(m_hwndCurrent, IDC_EDIT_LOCAL_IP, buffer, MAX_PATH);
+            m_ruleDraft.sourceIp = WideToUtf8(buffer);
+        }
+
+        // IP назначения
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_IP) == BST_CHECKED) {
+            m_ruleDraft.destIp = "Любые";
+        }
+        else {
+            GetDlgItemText(m_hwndCurrent, IDC_EDIT_REMOTE_IP, buffer, MAX_PATH);
+            m_ruleDraft.destIp = WideToUtf8(buffer);
+        }
+        break;
+    }
+    case PAGE_PARAMS_ADVANCED: {
+        // Аналогично PAGE_PARAMS_PROTO, только используйте свои контролы, например, IDC_ADV_PROTO_COMBO, IDC_ADV_SRC_PORT_EDIT и т.д.
+        int protoIdx = ComboBox_GetCurSel(GetDlgItem(m_hwndCurrent, IDC_ADV_PROTO_COMBO));
+        m_ruleDraft.protocol = protoIdx == CB_ERR ? Protocol::ANY : static_cast<Protocol>(protoIdx);
+
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_PORT) == BST_CHECKED) {
+            m_ruleDraft.sourcePort = 0;
+        }
+        else {
+            GetDlgItemText(m_hwndCurrent, IDC_ADV_SRC_PORT_EDIT, buffer, MAX_PATH);
+            m_ruleDraft.sourcePort = wcslen(buffer) ? _wtoi(buffer) : 0;
+        }
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_PORT) == BST_CHECKED) {
+            m_ruleDraft.destPort = 0;
+        }
+        else {
+            GetDlgItemText(m_hwndCurrent, IDC_ADV_DST_PORT_EDIT, buffer, MAX_PATH);
+            m_ruleDraft.destPort = wcslen(buffer) ? _wtoi(buffer) : 0;
+        }
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_IP) == BST_CHECKED) {
+            m_ruleDraft.sourceIp = "0.0.0.0";
+        }
+        else {
+            GetDlgItemText(m_hwndCurrent, IDC_ADV_SRC_IP_EDIT, buffer, MAX_PATH);
+            m_ruleDraft.sourceIp = WideToUtf8(buffer);
+        }
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_IP) == BST_CHECKED) {
+            m_ruleDraft.destIp = "0.0.0.0";
+        }
+        else {
+            GetDlgItemText(m_hwndCurrent, IDC_ADV_DST_IP_EDIT, buffer, MAX_PATH);
+            m_ruleDraft.destIp = WideToUtf8(buffer);
+        }
+        // Программа
+        GetDlgItemText(m_hwndCurrent, IDC_ADV_APP_PATH_EDIT, buffer, MAX_PATH);
+        m_ruleDraft.appPath = WideToUtf8(buffer);
+        break;
+    }
+    case PAGE_ACTION:
+        m_ruleDraft.action = IsDlgButtonChecked(m_hwndCurrent, IDC_RULE_ALLOW_RADIO) == BST_CHECKED
+            ? RuleAction::ALLOW : RuleAction::BLOCK;
+        break;
     case PAGE_NAME:
         GetDlgItemText(m_hwndCurrent, IDC_RULE_NAME_EDIT, buffer, MAX_PATH);
         m_ruleDraft.name = WideToUtf8(buffer);
-        break;
-    default:
+        GetDlgItemText(m_hwndCurrent, IDC_RULE_DESC_EDIT, buffer, MAX_PATH);
+        m_ruleDraft.description = WideToUtf8(buffer);
         break;
     }
     return true;
 }
-
 
 // Вспомогательный метод для получения ID диалога страницы
 int RuleWizard::GetPageDialogId(WizardPage page) {

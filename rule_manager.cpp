@@ -6,27 +6,104 @@
 #include <string>
 #include <codecvt>
 #include <locale>
+#include <fstream>
+#include <nlohmann/json.hpp>
 #include "rule.h"
 #include "string_utils.h" 
 #include "validator.h"
 #include "rule_wizard.h"
 
-RuleManager::RuleManager() = default;
+RuleManager::RuleManager() {
+    LoadRulesFromFile();
+}
 RuleManager::~RuleManager() = default;
+
+using nlohmann::json;
+
+// Сериализация Rule в json
+static std::string ProtocolToString(Protocol proto) {
+    switch (proto) {
+    case Protocol::ANY: return "ANY";
+    case Protocol::TCP: return "TCP";
+    case Protocol::UDP: return "UDP";
+    case Protocol::ICMP: return "ICMP";
+    default: return "UNKNOWN";
+    }
+}
+static Protocol ProtocolFromString(const std::string& str) {
+    if (str == "TCP") return Protocol::TCP;
+    if (str == "UDP") return Protocol::UDP;
+    if (str == "ICMP") return Protocol::ICMP;
+    return Protocol::ANY;
+}
+static std::string ActionToString(RuleAction act) { return act == RuleAction::ALLOW ? "ALLOW" : "BLOCK"; }
+static RuleAction ActionFromString(const std::string& str) { return str == "ALLOW" ? RuleAction::ALLOW : RuleAction::BLOCK; }
+static std::string DirectionToString(RuleDirection dir) { return dir == RuleDirection::Inbound ? "Inbound" : "Outbound"; }
+static RuleDirection DirectionFromString(const std::string& str) { return str == "Outbound" ? RuleDirection::Outbound : RuleDirection::Inbound; }
+
+bool RuleManager::SaveRulesToFile(const std::wstring& path) const {
+    // Сохраняем только в файл с ASCII-именем
+    std::ofstream f("rules.json", std::ios::out | std::ios::trunc);
+    if (!f) {
+        OutputDebugStringA("Не удалось создать rules.json!\n");
+        return false;
+    }
+    OutputDebugStringA("rules.json успешно открыт для записи.\n");
+    char buf[MAX_PATH];
+    GetCurrentDirectoryA(MAX_PATH, buf);
+    MessageBoxA(0, buf, "CurrentDirectory", MB_OK);
+    json arr = json::array();
+    for (const auto& r : rules) {
+        arr.push_back({
+            {"id", r.id},
+            {"name", r.name},
+            {"description", r.description},
+            {"protocol", ProtocolToString(r.protocol)},
+            {"sourceIp", r.sourceIp},
+            {"destIp", r.destIp},
+            {"sourcePort", r.sourcePort},
+            {"destPort", r.destPort},
+            {"appPath", r.appPath},
+            {"action", ActionToString(r.action)},
+            {"enabled", r.enabled},
+            {"direction", DirectionToString(r.direction)}
+            });
+    }
+    f << arr.dump(2);
+    return true;
+}
+
+bool RuleManager::LoadRulesFromFile(const std::wstring& path) {
+    std::lock_guard<std::mutex> lock(ruleMutex);
+    std::ifstream f(path);
+    if (!f) return false;
+    json arr;
+    f >> arr;
+    rules.clear();
+    nextRuleId = 1;
+    for (const auto& j : arr) {
+        Rule r;
+        r.id = j.value("id", 0);
+        r.name = j.value("name", "");
+        r.description = j.value("description", "");
+        r.protocol = ProtocolFromString(j.value("protocol", "ANY"));
+        r.sourceIp = j.value("sourceIp", "");
+        r.destIp = j.value("destIp", "");
+        r.sourcePort = j.value("sourcePort", 0);
+        r.destPort = j.value("destPort", 0);
+        r.appPath = j.value("appPath", "");
+        r.action = ActionFromString(j.value("action", "ALLOW"));
+        r.enabled = j.value("enabled", true);
+        r.direction = DirectionFromString(j.value("direction", "Inbound"));
+        rules.push_back(r);
+        if (r.id >= nextRuleId) nextRuleId = r.id + 1;
+    }
+    return true;
+}
 
 RuleManager& RuleManager::Instance() {
     static RuleManager instance;
     return instance;
-}
-
-std::wstring ProtocolToString(Protocol proto) {
-    switch (proto) {
-    case Protocol::ANY: return L"Любой";
-    case Protocol::TCP: return L"TCP";
-    case Protocol::UDP: return L"UDP";
-    case Protocol::ICMP: return L"ICMP";
-    default: return L"?";
-    }
 }
 
 void RuleManager::SetDirection(RuleDirection direction) {
@@ -44,24 +121,25 @@ bool RuleManager::AddRule(const Rule& rule) {
     Rule newRule = rule;
     newRule.id = nextRuleId++;
     rules.push_back(newRule);
+    SaveRulesToFile();
     return true;
 }
-
 bool RuleManager::RemoveRule(int ruleId) {
     std::lock_guard<std::mutex> lock(ruleMutex);
     auto it = std::find_if(rules.begin(), rules.end(), [ruleId](const Rule& r) { return r.id == ruleId; });
     if (it != rules.end()) {
         rules.erase(it);
+        SaveRulesToFile();
         return true;
     }
     return false;
 }
-
 bool RuleManager::UpdateRule(const Rule& rule) {
     std::lock_guard<std::mutex> lock(ruleMutex);
     auto it = std::find_if(rules.begin(), rules.end(), [&rule](const Rule& r) { return r.id == rule.id; });
     if (it != rules.end()) {
         *it = rule;
+        SaveRulesToFile();
         return true;
     }
     return false;
@@ -161,53 +239,39 @@ void FillRulesList(HWND hList) {
     auto rules = RuleManager::Instance().GetRules();
     auto currentDirection = RuleManager::Instance().GetCurrentDirection();
 
+    std::vector<std::vector<std::wstring>> allStrings;
+
     int itemIndex = 0;
     for (const auto& rule : rules) {
         if (rule.direction != currentDirection)
             continue;
 
+        std::vector<std::wstring> itemStrings;
+        itemStrings.push_back(Utf8ToWide(rule.name));
+        itemStrings.push_back(rule.enabled ? L"Вкл" : L"Выкл");
+        itemStrings.push_back(rule.action == RuleAction::ALLOW ? L"Разрешить" : L"Блокировать");
+        itemStrings.push_back(Utf8ToWide(rule.appPath));
+        itemStrings.push_back(Utf8ToWide(rule.sourceIp));
+        itemStrings.push_back(Utf8ToWide(rule.destIp));
+        itemStrings.push_back(Utf8ToWide(ProtocolToString(rule.protocol)));
+        itemStrings.push_back(rule.sourcePort == 0 ? L"Любой" : std::to_wstring(rule.sourcePort));
+        itemStrings.push_back(rule.destPort == 0 ? L"Любой" : std::to_wstring(rule.destPort));
+
+        allStrings.push_back(std::move(itemStrings));
+        auto& strings = allStrings.back();
+
         LVITEM lvi = { 0 };
         lvi.mask = LVIF_TEXT;
         lvi.iItem = itemIndex;
-
-        lvi.iSubItem = 0; // Название
-        lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.name).c_str());
+        lvi.iSubItem = 0;
+        lvi.pszText = (LPWSTR)strings[0].c_str();
         ListView_InsertItem(hList, &lvi);
 
-        lvi.iSubItem = 1; // Состояние
-        static const wchar_t* enabledText[] = { L"Выкл", L"Вкл" };
-        lvi.pszText = const_cast<LPWSTR>(enabledText[rule.enabled ? 1 : 0]);
-        ListView_SetItem(hList, &lvi);
-
-        lvi.iSubItem = 2; // Действие
-        lvi.pszText = const_cast<LPWSTR>(rule.action == RuleAction::ALLOW ? L"Разрешить" : L"Блокировать");
-        ListView_SetItem(hList, &lvi);
-
-        lvi.iSubItem = 3; // Программа
-        lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.appPath).c_str());
-        ListView_SetItem(hList, &lvi);
-
-        lvi.iSubItem = 4; // Локальный адрес
-        lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.sourceIp).c_str());
-        ListView_SetItem(hList, &lvi);
-
-        lvi.iSubItem = 5; // Адрес назначения
-        lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.destIp).c_str());
-        ListView_SetItem(hList, &lvi);
-
-        lvi.iSubItem = 6; // Протокол
-        std::wstring protocolStr = ProtocolToString(rule.protocol);
-        lvi.pszText = const_cast<LPWSTR>(protocolStr.c_str());
-        ListView_SetItem(hList, &lvi);
-
-        lvi.iSubItem = 7; // Локальный порт
-        lvi.pszText = const_cast<LPWSTR>(rule.sourcePort == 0 ? L"Любой" : std::to_wstring(rule.sourcePort).c_str());
-        ListView_SetItem(hList, &lvi);
-
-        lvi.iSubItem = 8; // Порт назначения
-        lvi.pszText = const_cast<LPWSTR>(rule.destPort == 0 ? L"Любой" : std::to_wstring(rule.destPort).c_str());
-        ListView_SetItem(hList, &lvi);
-
+        for (int i = 1; i < 9; ++i) {
+            lvi.iSubItem = i;
+            lvi.pszText = (LPWSTR)strings[i].c_str();
+            ListView_SetItem(hList, &lvi);
+        }
         itemIndex++;
     }
 }
@@ -229,6 +293,7 @@ bool RuleManager::ShowAddRuleWizard(HWND hParent) {
     Rule rule;
     RuleWizard wizard(hParent, rule);
     if (wizard.Show()) {
+        OutputDebugStringA(("Added rule: name=" + rule.name + " srcIP=" + rule.sourceIp + " appPath=" + rule.appPath + "\n").c_str());
         return AddRule(rule);
     }
     return false;
@@ -263,6 +328,50 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
         FillRulesList(hList);
         return TRUE;
     }
+    case WM_CONTEXTMENU: // Отрабатывает правый клик по любому контролу
+    {
+        HWND hwndFrom = (HWND)wParam;
+        if (hwndFrom == hList) {
+            // Получить позицию курсора
+            POINT pt;
+            pt.x = LOWORD(lParam);
+            pt.y = HIWORD(lParam);
+
+            // Если клик по клавише, то получить позицию выделенного
+            if (pt.x == -1 && pt.y == -1) {
+                int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+                if (sel != -1) {
+                    RECT rc;
+                    ListView_GetItemRect(hList, sel, &rc, LVIR_BOUNDS);
+                    pt.x = rc.left;
+                    pt.y = rc.bottom;
+                    ClientToScreen(hList, &pt);
+                }
+            }
+
+            HMENU hMenu = LoadMenu(GetModuleHandle(NULL), MAKEINTRESOURCE(IDR_RULE_CONTEXT_MENU));
+            HMENU hSubMenu = GetSubMenu(hMenu, 0);
+
+            int cmd = TrackPopupMenu(hSubMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwndDlg, NULL);
+
+            // Освободить меню
+            DestroyMenu(hMenu);
+
+            // Обработать команду
+            switch (cmd) {
+            case ID_CONTEXT_EDIT:
+                PostMessage(hwndDlg, WM_COMMAND, ID_EDIT_RULE, 0);
+                break;
+            case ID_CONTEXT_TOGGLE:
+                PostMessage(hwndDlg, WM_COMMAND, ID_TOGGLE_RULE, 0);
+                break;
+            case ID_CONTEXT_DELETE:
+                PostMessage(hwndDlg, WM_COMMAND, ID_DELETE_RULE, 0);
+                break;
+            }
+        }
+        return TRUE;
+    }
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case IDC_RADIO_INBOUND:
@@ -280,10 +389,53 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
                 FillRulesList(hList);
             }
             return TRUE;
-        case ID_DELETE_RULE:
-            DeleteSelectedRule(hList);
-            FillRulesList(hList);
-            return TRUE;
+        case ID_DELETE_RULE: {
+            int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (sel == -1) break;
+            auto rules = RuleManager::Instance().GetRules();
+            if (sel >= 0 && sel < (int)rules.size()) {
+                if (MessageBox(hwndDlg, L"Удалить выбранное правило?", L"Подтверждение", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+                    int ruleId = rules[sel].id;
+                    RuleManager::Instance().RemoveRule(ruleId);
+                    FillRulesList(hList);
+                }
+            }
+            break;
+        }
+        case ID_EDIT_RULE: {
+            int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (sel == -1) break;
+            auto rules = RuleManager::Instance().GetRules();
+            if (sel >= 0 && sel < (int)rules.size()) {
+                int ruleId = rules[sel].id;
+                auto ruleOpt = RuleManager::Instance().GetRuleById(ruleId);
+                if (ruleOpt) {
+                    Rule rule = *ruleOpt;
+                    RuleWizard wizard(hwndDlg, rule); // hwndDlg — родительское окно
+                    if (wizard.Show()) {
+                        RuleManager::Instance().UpdateRule(rule);
+                        FillRulesList(hList);
+                    }
+                }
+            }
+            break;
+        }
+        case ID_TOGGLE_RULE: {
+            int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (sel == -1) break;
+            auto rules = RuleManager::Instance().GetRules();
+            if (sel >= 0 && sel < (int)rules.size()) {
+                int ruleId = rules[sel].id;
+                auto ruleOpt = RuleManager::Instance().GetRuleById(ruleId);
+                if (ruleOpt) {
+                    Rule rule = *ruleOpt;
+                    rule.enabled = !rule.enabled;
+                    RuleManager::Instance().UpdateRule(rule);
+                    FillRulesList(hList);
+                }
+            }
+            break;
+        }
         case IDOK:
         case IDCANCEL:
             EndDialog(hwndDlg, LOWORD(wParam));
@@ -291,5 +443,6 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
         }
         break;
     }
+
     return FALSE;
 }

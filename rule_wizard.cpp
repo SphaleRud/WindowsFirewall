@@ -8,225 +8,130 @@
 #include <windowsx.h>
 #include <shlwapi.h>
 
-RuleWizard::WizardPage RuleWizard::currentPage = PAGE_TYPE;
-int RuleWizard::selectedType = 0;
-
-RuleWizard* RuleWizard::s_instance = nullptr;
 
 RuleWizard::RuleWizard(HWND hParent, Rule& rule)
     : m_hwndParent(hParent)
     , m_hwndMain(NULL)
     , m_hwndCurrent(NULL)
     , m_currentPage(PAGE_TYPE)
-    , m_rule(rule)
+    , m_ruleDraft(rule)
     , m_selectedType(0)
 {
-    s_instance = this;
 }
 
-RuleWizard::~RuleWizard()
-{
-    s_instance = nullptr;
-}
+RuleWizard::~RuleWizard() {}
 
-Rule* RuleWizard::currentRule = nullptr;
-bool RuleWizard::isEditMode = false;
-
-bool RuleWizard::ShowWizard(HWND parent, Rule& rule) {
-    currentRule = &rule;
-    isEditMode = false;
-    return DialogBox(
+bool RuleWizard::Show() {
+    // Запускаем диалог мастера
+    INT_PTR res = DialogBoxParam(
         GetModuleHandle(NULL),
         MAKEINTRESOURCE(IDD_RULE_WIZARD),
-        parent,
-        DialogProc
-    ) == IDOK;
-}
-
-bool RuleWizard::EditRule(HWND parent, Rule& rule) {
-    currentRule = &rule;
-    isEditMode = true;
-    return DialogBox(
-        GetModuleHandle(NULL),
-        MAKEINTRESOURCE(IDD_RULE_WIZARD),
-        parent,
-        DialogProc
-    ) == IDOK;
-}
-
-void RuleWizard::InitDialog(HWND hwnd) {
-    // Инициализация комбобокса протоколов
-    HWND hProtocol = GetDlgItem(hwnd, IDC_COMBO_PROTOCOL);
-    ComboBox_AddString(hProtocol, L"Любой");
-    ComboBox_AddString(hProtocol, L"TCP");
-    ComboBox_AddString(hProtocol, L"UDP");
-    ComboBox_AddString(hProtocol, L"ICMP");
-    ComboBox_SetCurSel(hProtocol, 0);
-
-    // Установка текущего времени UTC в формате YYYY-MM-DD HH:MM:SS
-    time_t now;
-    time(&now);
-    tm utc_tm;
-    gmtime_s(&utc_tm, &now);
-    wchar_t timeStr[64];
-    swprintf_s(timeStr, L"%04d-%02d-%02d %02d:%02d:%02d",
-        utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday,
-        utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
-    SetDlgItemText(hwnd, IDC_EDIT_NAME, timeStr);
-
-    // Инициализация чекбоксов
-    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_IP), BST_CHECKED);
-    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_IP), BST_CHECKED);
-    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_PORT), BST_CHECKED);
-    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_PORT), BST_CHECKED);
-
-    // Отключаем поля ввода по умолчанию
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_IP), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_IP), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_PORT), FALSE);
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_PORT), FALSE);
-
-    // По умолчанию выбираем "Разрешить"
-    CheckRadioButton(hwnd, IDC_RADIO_ALLOW, IDC_RADIO_BLOCK, IDC_RADIO_ALLOW);
-
-    if (isEditMode && currentRule) {
-        LoadRule(hwnd);
+        m_hwndParent,
+        DialogProc,
+        reinterpret_cast<LPARAM>(this)
+    );
+    if (res == IDOK) {
+        // Копируем данные из черновика в исходную Rule
+        m_ruleDraft = m_ruleDraft;
+        return true;
     }
-}
-
-void RuleWizard::LoadRule(HWND hwnd) {
-    if (!currentRule) return;
-
-    // Загружаем данные правила
-    SetDlgItemText(hwnd, IDC_EDIT_NAME, Utf8ToWide(currentRule->name).c_str());
-    SetDlgItemText(hwnd, IDC_EDIT_PROGRAM, Utf8ToWide(currentRule->appPath).c_str());
-
-    // Действие
-    CheckRadioButton(hwnd, IDC_RADIO_ALLOW, IDC_RADIO_BLOCK,
-        currentRule->action == RuleAction::ALLOW ? IDC_RADIO_ALLOW : IDC_RADIO_BLOCK);
-
-    // Протокол
-    HWND hProtocol = GetDlgItem(hwnd, IDC_COMBO_PROTOCOL);
-    int protocolIndex = static_cast<int>(currentRule->protocol);
-    ComboBox_SetCurSel(hProtocol, protocolIndex);
-
-    // IP адреса
-    bool anyLocalIp = (currentRule->sourceIp == "0.0.0.0" || currentRule->sourceIp.empty());
-    bool anyRemoteIp = (currentRule->destIp == "0.0.0.0" || currentRule->destIp.empty());
-
-    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_IP), anyLocalIp ? BST_CHECKED : BST_UNCHECKED);
-    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_IP), anyRemoteIp ? BST_CHECKED : BST_UNCHECKED);
-
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_IP), !anyLocalIp);
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_IP), !anyRemoteIp);
-
-    if (!anyLocalIp) {
-        SetDlgItemText(hwnd, IDC_EDIT_LOCAL_IP, Utf8ToWide(currentRule->sourceIp).c_str());
-    }
-    if (!anyRemoteIp) {
-        SetDlgItemText(hwnd, IDC_EDIT_REMOTE_IP, Utf8ToWide(currentRule->destIp).c_str());
-    }
-
-    // Порты
-    bool anyLocalPort = (currentRule->sourcePort == 0);
-    bool anyRemotePort = (currentRule->destPort == 0);
-
-    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_PORT), anyLocalPort ? BST_CHECKED : BST_UNCHECKED);
-    Button_SetCheck(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_PORT), anyRemotePort ? BST_CHECKED : BST_UNCHECKED);
-
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_PORT), !anyLocalPort);
-    EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_PORT), !anyRemotePort);
-
-    if (!anyLocalPort) {
-        SetDlgItemText(hwnd, IDC_EDIT_LOCAL_PORT, std::to_wstring(currentRule->sourcePort).c_str());
-    }
-    if (!anyRemotePort) {
-        SetDlgItemText(hwnd, IDC_EDIT_REMOTE_PORT, std::to_wstring(currentRule->destPort).c_str());
-    }
+    return false;
 }
 
 bool RuleWizard::SaveRule(HWND hwnd) {
-    if (!currentRule) return false;
-
-    std::wstring errorMsg;
-    if (!RuleValidator::ValidateInputs(hwnd, errorMsg)) {
-        MessageBox(hwnd, errorMsg.c_str(), L"Ошибка", MB_OK | MB_ICONERROR);
-        return false;
-    }
+    if (!hwnd) return false;
 
     wchar_t buffer[MAX_PATH];
 
     // Название
-    GetDlgItemText(hwnd, IDC_EDIT_NAME, buffer, MAX_PATH);
-    currentRule->name = WideToUtf8(buffer);
+    GetDlgItemText(hwnd, IDC_RULE_NAME_EDIT, buffer, MAX_PATH);
+    m_ruleDraft.name = WideToUtf8(buffer);
 
-    // Путь к программе
-    GetDlgItemText(hwnd, IDC_EDIT_PROGRAM, buffer, MAX_PATH);
-    currentRule->appPath = WideToUtf8(buffer);
+    // Состояние (enabled) — если есть чекбокс, иначе по умолчанию true
+    // currentRule->enabled = (IsDlgButtonChecked(hwnd, IDC_RULE_ENABLED_CHECK) == BST_CHECKED);
+    m_ruleDraft.enabled = true;
 
     // Действие
-    currentRule->action = IsDlgButtonChecked(hwnd, IDC_RADIO_ALLOW) == BST_CHECKED ?
-        RuleAction::ALLOW : RuleAction::BLOCK;
+    m_ruleDraft.action = IsDlgButtonChecked(hwnd, IDC_RULE_ALLOW_RADIO) == BST_CHECKED
+        ? RuleAction::ALLOW : RuleAction::BLOCK;
 
-    // Протокол
-    int protocolIndex = ComboBox_GetCurSel(GetDlgItem(hwnd, IDC_COMBO_PROTOCOL));
-    currentRule->protocol = static_cast<Protocol>(protocolIndex);
+    // Программа
+    GetDlgItemText(hwnd, IDC_APP_PATH_EDIT, buffer, MAX_PATH);
+    m_ruleDraft.appPath = WideToUtf8(buffer);
 
-    // IP адреса
+    // Локальный адрес
     if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_LOCAL_IP) == BST_CHECKED) {
-        currentRule->sourceIp = "0.0.0.0";
+        m_ruleDraft.sourceIp = "0.0.0.0";
     }
     else {
         GetDlgItemText(hwnd, IDC_EDIT_LOCAL_IP, buffer, MAX_PATH);
-        currentRule->sourceIp = WideToUtf8(buffer);
+        m_ruleDraft.sourceIp = WideToUtf8(buffer);
     }
 
+    // Адрес назначения
     if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_REMOTE_IP) == BST_CHECKED) {
-        currentRule->destIp = "0.0.0.0";
+        m_ruleDraft.destIp = "0.0.0.0";
     }
     else {
         GetDlgItemText(hwnd, IDC_EDIT_REMOTE_IP, buffer, MAX_PATH);
-        currentRule->destIp = WideToUtf8(buffer);
+        m_ruleDraft.destIp = WideToUtf8(buffer);
     }
 
-    // Порты
+    // Протокол (ищем текущий протокол в любом из возможных комбобоксов)
+    int protoIdx = CB_ERR;
+    HWND protoCombo = GetDlgItem(hwnd, IDC_PROTOCOL_COMBO);
+    if (protoCombo)
+        protoIdx = ComboBox_GetCurSel(protoCombo);
+    else {
+        protoCombo = GetDlgItem(hwnd, IDC_COMBO_PROTOCOL);
+        if (protoCombo)
+            protoIdx = ComboBox_GetCurSel(protoCombo);
+        else {
+            protoCombo = GetDlgItem(hwnd, IDC_ADV_PROTO_COMBO);
+            if (protoCombo)
+                protoIdx = ComboBox_GetCurSel(protoCombo);
+        }
+    }
+    if (protoIdx == CB_ERR)
+        m_ruleDraft.protocol = Protocol::ANY;
+    else
+        m_ruleDraft.protocol = static_cast<Protocol>(protoIdx);
+
+    // Локальный порт
     if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_LOCAL_PORT) == BST_CHECKED) {
-        currentRule->sourcePort = 0;
+        m_ruleDraft.sourcePort = 0;
     }
     else {
         GetDlgItemText(hwnd, IDC_EDIT_LOCAL_PORT, buffer, MAX_PATH);
-        currentRule->sourcePort = _wtoi(buffer);
+        if (wcslen(buffer) == 0)
+            m_ruleDraft.sourcePort = 0;
+        else
+            m_ruleDraft.sourcePort = _wtoi(buffer);
     }
 
+    // Порт назначения
     if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_REMOTE_PORT) == BST_CHECKED) {
-        currentRule->destPort = 0;
+        m_ruleDraft.destPort = 0;
     }
     else {
         GetDlgItemText(hwnd, IDC_EDIT_REMOTE_PORT, buffer, MAX_PATH);
-        currentRule->destPort = _wtoi(buffer);
+        if (wcslen(buffer) == 0)
+            m_ruleDraft.destPort = 0;
+        else
+            m_ruleDraft.destPort = _wtoi(buffer);
     }
 
-    // Создатель правила
-    currentRule->creator = "BlackBruceLee576"; // текущий пользователь
+    // Если есть описание, сохраняем
+    GetDlgItemText(hwnd, IDC_RULE_DESC_EDIT, buffer, MAX_PATH);
+    m_ruleDraft.description = WideToUtf8(buffer);
 
-    // Время создания
-    time_t now;
-    time(&now);
-    tm utc_tm;
-    gmtime_s(&utc_tm, &now);
-    char timeStr[64];
-    sprintf_s(timeStr, "%04d-%02d-%02d %02d:%02d:%02d",
-        utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday,
-        utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec);
-    currentRule->creationTime = timeStr;
+    // creator, creationTime — можно заполнить как раньше
 
     return true;
 }
 
-void RuleWizard::BrowseForProgram(HWND hwnd) {
+void RuleWizard::BrowseForProgram(HWND hwnd, int editId) {
     wchar_t filePath[MAX_PATH] = { 0 };
-
-    // Настраиваем диалог выбора файла
     OPENFILENAME ofn = { 0 };
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
@@ -235,82 +140,43 @@ void RuleWizard::BrowseForProgram(HWND hwnd) {
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
     ofn.lpstrDefExt = L"exe";
-
     if (GetOpenFileName(&ofn)) {
-        SetDlgItemText(hwnd, IDC_EDIT_PROGRAM, filePath);
+        SetDlgItemText(hwnd, editId, filePath);
     }
 }
 
-INT_PTR CALLBACK RuleWizard::DialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    switch (msg) {
-    case WM_INITDIALOG:
-        InitDialog(hwnd);
-        ShowPage(hwnd, PAGE_TYPE);
-        return TRUE;
 
+INT_PTR CALLBACK RuleWizard::DialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    RuleWizard* self = nullptr;
+    if (msg == WM_INITDIALOG) {
+        self = reinterpret_cast<RuleWizard*>(lParam);
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+        self->m_hwndMain = hwnd;
+        self->ShowPage(PAGE_TYPE);
+        return TRUE;
+    }
+    else {
+        self = reinterpret_cast<RuleWizard*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+    }
+    if (!self) return FALSE;
+
+    switch (msg) {
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case IDC_WIZARD_NEXT:
-            if (!ValidateCurrentPage())
-                return TRUE;
-
-            if (currentPage == PAGE_NAME) {
-                if (SaveRule(hwnd)) {
+            if (!self->ValidateCurrentPage()) return TRUE;
+            if (self->m_currentPage == PAGE_NAME) {
+                if (self->ApplyPageData() && self->SaveRule(self->m_hwndCurrent)) {
                     EndDialog(hwnd, IDOK);
                 }
             }
             else {
-                WizardPage nextPage;
-                if (currentPage == PAGE_TYPE) {
-                    switch (selectedType) {
-                    case 0: nextPage = PAGE_PARAMS_APP; break;
-                    case 1: nextPage = PAGE_PARAMS_PORT; break;
-                    case 2: nextPage = PAGE_PARAMS_PROTO; break;
-                    case 3: nextPage = PAGE_PARAMS_ADVANCED; break;
-                    default: nextPage = PAGE_PARAMS_APP; break;
-                    }
-                }
-                else if (currentPage == PAGE_PARAMS_APP ||
-                    currentPage == PAGE_PARAMS_PORT ||
-                    currentPage == PAGE_PARAMS_PROTO ||
-                    currentPage == PAGE_PARAMS_ADVANCED) {
-                    nextPage = PAGE_ACTION;
-                }
-                else if (currentPage == PAGE_ACTION) {
-                    nextPage = PAGE_NAME;
-                }
-                ShowPage(hwnd, nextPage);
+                self->GoToNextPage();
             }
             return TRUE;
-
         case IDC_WIZARD_BACK:
-            if (currentPage > PAGE_TYPE) {
-                WizardPage prevPage;
-                if (currentPage == PAGE_NAME) {
-                    prevPage = PAGE_ACTION;
-                }
-                else if (currentPage == PAGE_ACTION) {
-                    switch (selectedType) {
-                    case 0: prevPage = PAGE_PARAMS_APP; break;
-                    case 1: prevPage = PAGE_PARAMS_PORT; break;
-                    case 2: prevPage = PAGE_PARAMS_PROTO; break;
-                    case 3: prevPage = PAGE_PARAMS_ADVANCED; break;
-                    default: prevPage = PAGE_PARAMS_APP; break;
-                    }
-                }
-                else {
-                    prevPage = PAGE_TYPE;
-                }
-                ShowPage(hwnd, prevPage);
-            }
+            self->GoToPrevPage();
             return TRUE;
-
-        case IDC_BROWSE_PROGRAM:
-            if (HIWORD(wParam) == BN_CLICKED) {
-                BrowseForProgram(hwnd);
-            }
-            return TRUE;
-
         case IDCANCEL:
             EndDialog(hwnd, IDCANCEL);
             return TRUE;
@@ -321,227 +187,138 @@ INT_PTR CALLBACK RuleWizard::DialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
 }
 
 bool RuleWizard::ValidateCurrentPage() {
-    if (!s_instance || !s_instance->m_hwndCurrent)
-        return false;
-
     wchar_t buffer[MAX_PATH];
-
-    switch (s_instance->m_currentPage) {
+    switch (m_currentPage) {
     case PAGE_TYPE:
-        s_instance->m_selectedType = SendDlgItemMessage(s_instance->m_hwndCurrent,
-            IDC_RULE_TYPE_COMBO, CB_GETCURSEL, 0, 0);
-        if (s_instance->m_selectedType == CB_ERR) {
-            MessageBox(s_instance->m_hwndCurrent,
-                L"Пожалуйста, выберите тип правила.",
-                L"Ошибка", MB_OK | MB_ICONWARNING);
+        m_selectedType = static_cast<int>(SendDlgItemMessage(m_hwndCurrent, IDC_RULE_TYPE_COMBO, CB_GETCURSEL, 0, 0));
+        if (m_selectedType == CB_ERR) {
+            MessageBox(m_hwndCurrent, L"Выберите тип правила", L"Ошибка", MB_OK | MB_ICONWARNING);
             return false;
         }
         return true;
-
     case PAGE_PARAMS_APP:
-        GetDlgItemText(s_instance->m_hwndCurrent, IDC_APP_PATH_EDIT, buffer, MAX_PATH);
-        if (buffer[0] != '\0' && GetFileAttributes(buffer) == INVALID_FILE_ATTRIBUTES) {
-            MessageBox(s_instance->m_hwndCurrent,
-                L"Указанный файл не существует.",
-                L"Ошибка", MB_OK | MB_ICONWARNING);
+        GetDlgItemText(m_hwndCurrent, IDC_APP_PATH_EDIT, buffer, MAX_PATH);
+        if (buffer[0] == L'\0') {
+            MessageBox(m_hwndCurrent, L"Укажите путь к приложению", L"Ошибка", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+        if (GetFileAttributes(buffer) == INVALID_FILE_ATTRIBUTES) {
+            MessageBox(m_hwndCurrent, L"Указан некорректный путь к файлу", L"Ошибка", MB_OK | MB_ICONWARNING);
             return false;
         }
         return true;
-
     case PAGE_PARAMS_PORT:
-        GetDlgItemText(s_instance->m_hwndCurrent, IDC_PORT_EDIT, buffer, MAX_PATH);
-        if (buffer[0] == '\0') {
-            MessageBox(s_instance->m_hwndCurrent,
-                L"Введите номер порта или диапазон портов.",
-                L"Ошибка", MB_OK | MB_ICONWARNING);
+        GetDlgItemText(m_hwndCurrent, IDC_PORT_EDIT, buffer, MAX_PATH);
+        if (buffer[0] == L'\0' || _wtoi(buffer) <= 0 || _wtoi(buffer) > 65535) {
+            MessageBox(m_hwndCurrent, L"Введите корректный номер порта (1-65535)", L"Ошибка", MB_OK | MB_ICONWARNING);
             return false;
         }
-        // Здесь должна быть валидация формата порта
         return true;
-
     case PAGE_NAME:
-        GetDlgItemText(s_instance->m_hwndCurrent, IDC_RULE_NAME_EDIT, buffer, MAX_PATH);
-        if (buffer[0] == '\0') {
-            MessageBox(s_instance->m_hwndCurrent,
-                L"Введите название правила.",
-                L"Ошибка", MB_OK | MB_ICONWARNING);
+        GetDlgItemText(m_hwndCurrent, IDC_RULE_NAME_EDIT, buffer, MAX_PATH);
+        if (buffer[0] == L'\0') {
+            MessageBox(m_hwndCurrent, L"Введите имя правила", L"Ошибка", MB_OK | MB_ICONWARNING);
             return false;
         }
         return true;
-
     default:
         return true;
     }
 }
 
-void RuleWizard::SetupPageControls(HWND hwnd) {
-    switch (currentPage) {
-    case PAGE_TYPE:
-        // Показываем выбор типа правила
-        EnableWindow(GetDlgItem(hwnd, IDC_COMBO_PROTOCOL), TRUE);
-        break;
 
-    case PAGE_PARAMS_APP:
-        // Показываем выбор программы
-        EnableWindow(GetDlgItem(hwnd, IDC_EDIT_PROGRAM), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_BROWSE_PROGRAM), TRUE);
-        break;
-
-    case PAGE_PARAMS_PORT:
-        // Показываем настройки портов
-        EnableWindow(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_PORT), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_EDIT_LOCAL_PORT),
-            IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_LOCAL_PORT) != BST_CHECKED);
-        EnableWindow(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_PORT), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_EDIT_REMOTE_PORT),
-            IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_REMOTE_PORT) != BST_CHECKED);
-        break;
-
-    case PAGE_PARAMS_PROTO:
-        // Показываем выбор протокола
-        EnableWindow(GetDlgItem(hwnd, IDC_COMBO_PROTOCOL), TRUE);
-        break;
-
-    case PAGE_PARAMS_ADVANCED:
-        // Показываем все параметры
-        EnableWindow(GetDlgItem(hwnd, IDC_EDIT_PROGRAM), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_BROWSE_PROGRAM), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_IP), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_IP), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_CHECK_ANY_LOCAL_PORT), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_CHECK_ANY_REMOTE_PORT), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_COMBO_PROTOCOL), TRUE);
-        break;
-
-    case PAGE_ACTION:
-        // Показываем выбор действия
-        EnableWindow(GetDlgItem(hwnd, IDC_RADIO_ALLOW), TRUE);
-        EnableWindow(GetDlgItem(hwnd, IDC_RADIO_BLOCK), TRUE);
-        break;
-
-    case PAGE_NAME:
-        // Показываем поля имени и описания
-        EnableWindow(GetDlgItem(hwnd, IDC_EDIT_NAME), TRUE);
-        break;
-    }
-}
-
-bool RuleWizard::SavePageData() {
-    if (!s_instance || !s_instance->m_hwndCurrent)
-        return false;
-
-    wchar_t buffer[MAX_PATH];
-
-    switch (s_instance->m_currentPage) {
-    case PAGE_TYPE:
-        s_instance->m_selectedType = SendDlgItemMessage(s_instance->m_hwndCurrent,
-            IDC_RULE_TYPE_COMBO, CB_GETCURSEL, 0, 0);
-        return true;
-
-    case PAGE_PARAMS_APP:
-        GetDlgItemText(s_instance->m_hwndCurrent, IDC_APP_PATH_EDIT, buffer, MAX_PATH);
-        s_instance->m_rule.appPath = WideToUtf8(buffer);
-        return true;
-
-    case PAGE_PARAMS_PORT:
-        GetDlgItemText(s_instance->m_hwndCurrent, IDC_PORT_EDIT, buffer, MAX_PATH);
-        // Здесь должна быть обработка порта и сохранение в правило
-        return true;
-
-    case PAGE_PARAMS_PROTO:
-        s_instance->m_rule.protocol = static_cast<Protocol>(
-            SendDlgItemMessage(s_instance->m_hwndCurrent,
-                IDC_PROTOCOL_COMBO, CB_GETCURSEL, 0, 0));
-        return true;
-
-    case PAGE_ACTION:
-        s_instance->m_rule.action =
-            (IsDlgButtonChecked(s_instance->m_hwndCurrent, IDC_RULE_ALLOW_RADIO) == BST_CHECKED) ?
-            RuleAction::ALLOW : RuleAction::BLOCK;
-        return true;
-
-    case PAGE_NAME:
-        GetDlgItemText(s_instance->m_hwndCurrent, IDC_RULE_NAME_EDIT, buffer, MAX_PATH);
-        s_instance->m_rule.name = WideToUtf8(buffer);
-        GetDlgItemText(s_instance->m_hwndCurrent, IDC_RULE_DESC_EDIT, buffer, MAX_PATH);
-        s_instance->m_rule.description = WideToUtf8(buffer);
-        return true;
-
-    default:
-        return true;
-    }
-}
 
 void RuleWizard::ShowPage(WizardPage page) {
-    OutputDebugString(L"ShowPage: Starting\n");
-
-    if (!SavePageData()) {
-        OutputDebugString(L"ShowPage: SavePageData failed\n");
-        return;
-    }
-
     if (m_hwndCurrent) {
         DestroyWindow(m_hwndCurrent);
         m_hwndCurrent = NULL;
     }
-
     m_currentPage = page;
-
-    // Создаем новую страницу
-    OutputDebugString(L"ShowPage: Creating page dialog\n");
-    m_hwndCurrent = CreateDialog(
+    m_hwndCurrent = CreateDialogParam(
         GetModuleHandle(NULL),
         MAKEINTRESOURCE(GetPageDialogId(page)),
         m_hwndMain,
-        PageDlgProc
+        PageDlgProc,
+        reinterpret_cast<LPARAM>(this)
     );
-
     if (!m_hwndCurrent) {
-        DWORD error = GetLastError();
-        wchar_t msg[256];
-        swprintf_s(msg, L"Failed to create page dialog. Error: %d", error);
-        OutputDebugString(msg);
-        MessageBox(m_hwndMain, msg, L"Error", MB_OK | MB_ICONERROR);
+        MessageBox(m_hwndMain, L"Не удалось создать страницу мастера.", L"Ошибка", MB_OK | MB_ICONERROR);
         return;
     }
-
-    OutputDebugString(L"ShowPage: Page dialog created successfully\n");
-
-    // Размещаем страницу в контейнере
     HWND container = GetDlgItem(m_hwndMain, IDC_PAGE_CONTAINER);
-    if (!container) {
-        OutputDebugString(L"ShowPage: Container not found\n");
-        MessageBox(m_hwndMain, L"Container not found", L"Error", MB_OK | MB_ICONERROR);
-        return;
-    }
-
     RECT rc;
     GetClientRect(container, &rc);
-    SetWindowPos(m_hwndCurrent, NULL,
-        rc.left, rc.top,
-        rc.right - rc.left, rc.bottom - rc.top,
-        SWP_NOZORDER);
-
-    // Инициализируем элементы управления
-    if (page == PAGE_TYPE) {
-        HWND combo = GetDlgItem(m_hwndCurrent, IDC_RULE_TYPE_COMBO);
-        if (combo) {
-            ComboBox_AddString(combo, L"По приложению");
-            ComboBox_AddString(combo, L"По порту");
-            ComboBox_AddString(combo, L"По протоколу");
-            ComboBox_AddString(combo, L"Расширенное");
-            ComboBox_SetCurSel(combo, m_selectedType);
-            OutputDebugString(L"ShowPage: ComboBox initialized\n");
-        }
-        else {
-            OutputDebugString(L"ShowPage: Failed to get ComboBox handle\n");
-        }
-    }
-
+    SetWindowPos(m_hwndCurrent, NULL, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SWP_NOZORDER);
     ShowWindow(m_hwndCurrent, SW_SHOW);
     UpdateButtons();
-    OutputDebugString(L"ShowPage: Completed\n");
 }
+
+void RuleWizard::GoToNextPage() {
+    WizardPage next = m_currentPage;
+    switch (m_currentPage) {
+    case PAGE_TYPE:
+        next = static_cast<WizardPage>(m_selectedType + 1); // PAGE_PARAMS_APP и т.д.
+        break;
+    case PAGE_PARAMS_APP:
+    case PAGE_PARAMS_PORT:
+    case PAGE_PARAMS_PROTO:
+    case PAGE_PARAMS_ADVANCED:
+        next = PAGE_ACTION;
+        break;
+    case PAGE_ACTION:
+        next = PAGE_NAME;
+        break;
+    default:
+        break;
+    }
+    ShowPage(next);
+}
+
+void RuleWizard::GoToPrevPage() {
+    WizardPage prev = m_currentPage;
+    switch (m_currentPage) {
+    case PAGE_NAME:
+        prev = PAGE_ACTION;
+        break;
+    case PAGE_ACTION:
+        prev = static_cast<WizardPage>(m_selectedType + 1);
+        break;
+    case PAGE_PARAMS_APP:
+    case PAGE_PARAMS_PORT:
+    case PAGE_PARAMS_PROTO:
+    case PAGE_PARAMS_ADVANCED:
+        prev = PAGE_TYPE;
+        break;
+    default:
+        break;
+    }
+    ShowPage(prev);
+}
+
+bool RuleWizard::ApplyPageData() {
+    wchar_t buffer[MAX_PATH];
+    switch (m_currentPage) {
+    case PAGE_TYPE:
+        m_selectedType = static_cast<int>(SendDlgItemMessage(m_hwndCurrent, IDC_RULE_TYPE_COMBO, CB_GETCURSEL, 0, 0));
+        break;
+    case PAGE_PARAMS_APP:
+        GetDlgItemText(m_hwndCurrent, IDC_APP_PATH_EDIT, buffer, MAX_PATH);
+        m_ruleDraft.appPath = WideToUtf8(buffer);
+        break;
+    case PAGE_PARAMS_PORT:
+        GetDlgItemText(m_hwndCurrent, IDC_PORT_EDIT, buffer, MAX_PATH);
+        m_ruleDraft.sourcePort = _wtoi(buffer);
+        break;
+    case PAGE_NAME:
+        GetDlgItemText(m_hwndCurrent, IDC_RULE_NAME_EDIT, buffer, MAX_PATH);
+        m_ruleDraft.name = WideToUtf8(buffer);
+        break;
+    default:
+        break;
+    }
+    return true;
+}
+
 
 // Вспомогательный метод для получения ID диалога страницы
 int RuleWizard::GetPageDialogId(WizardPage page) {
@@ -560,10 +337,83 @@ int RuleWizard::GetPageDialogId(WizardPage page) {
 
 
 void RuleWizard::UpdateButtons() {
-    // Кнопка "Назад" активна везде, кроме первой страницы
     EnableWindow(GetDlgItem(m_hwndMain, IDC_WIZARD_BACK), m_currentPage > PAGE_TYPE);
+    SetDlgItemText(m_hwndMain, IDC_WIZARD_NEXT, m_currentPage == PAGE_NAME ? L"Готово" : L"Далее >");
+}
 
-    // На последней странице меняем текст кнопки "Далее" на "Готово"
-    SetDlgItemText(m_hwndMain, IDC_WIZARD_NEXT,
-        m_currentPage == PAGE_NAME ? L"Готово" : L"Далее >");
+INT_PTR CALLBACK RuleWizard::PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    RuleWizard* self = reinterpret_cast<RuleWizard*>(GetWindowLongPtr(GetParent(hwnd), GWLP_USERDATA));
+    if (msg == WM_INITDIALOG) {
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+        // Заполнение комбобокса типа правила (только на PAGE_TYPE)
+        HWND ruleTypeCombo = GetDlgItem(hwnd, IDC_RULE_TYPE_COMBO);
+        if (ruleTypeCombo) {
+            ComboBox_ResetContent(ruleTypeCombo);
+            ComboBox_AddString(ruleTypeCombo, L"По приложению");
+            ComboBox_AddString(ruleTypeCombo, L"По порту");
+            ComboBox_AddString(ruleTypeCombo, L"По протоколу");
+            ComboBox_AddString(ruleTypeCombo, L"Пользовательские");
+            ComboBox_SetCurSel(ruleTypeCombo, self ? self->m_selectedType : 0);
+        }
+        // Заполнение комбобоксов протоколов (для всех страниц, где они есть)
+        HWND protoCombo = GetDlgItem(hwnd, IDC_PROTOCOL_COMBO);
+        if (protoCombo) {
+            ComboBox_ResetContent(protoCombo);
+            ComboBox_AddString(protoCombo, L"Любой");
+            ComboBox_AddString(protoCombo, L"TCP");
+            ComboBox_AddString(protoCombo, L"UDP");
+            ComboBox_AddString(protoCombo, L"ICMP");
+            ComboBox_SetCurSel(protoCombo, 0);
+        }
+        HWND comboProto = GetDlgItem(hwnd, IDC_COMBO_PROTOCOL);
+        if (comboProto) {
+            ComboBox_ResetContent(comboProto);
+            ComboBox_AddString(comboProto, L"Любой");
+            ComboBox_AddString(comboProto, L"TCP");
+            ComboBox_AddString(comboProto, L"UDP");
+            ComboBox_AddString(comboProto, L"ICMP");
+            ComboBox_SetCurSel(comboProto, 0);
+        }
+        HWND advProtoCombo = GetDlgItem(hwnd, IDC_ADV_PROTO_COMBO);
+        if (advProtoCombo) {
+            ComboBox_ResetContent(advProtoCombo);
+            ComboBox_AddString(advProtoCombo, L"Любой");
+            ComboBox_AddString(advProtoCombo, L"TCP");
+            ComboBox_AddString(advProtoCombo, L"UDP");
+            ComboBox_AddString(advProtoCombo, L"ICMP");
+            ComboBox_SetCurSel(advProtoCombo, 0);
+        }
+        return TRUE;
+    }
+    if (msg == WM_COMMAND) {
+        switch (LOWORD(wParam)) {
+        case IDC_CHECK_ANY_LOCAL_PORT:
+        case IDC_CHECK_ANY_REMOTE_PORT:
+        case IDC_CHECK_ANY_LOCAL_IP:
+        case IDC_CHECK_ANY_REMOTE_IP: {
+            int editId = 0;
+            if (LOWORD(wParam) == IDC_CHECK_ANY_LOCAL_PORT)
+                editId = (GetDlgItem(hwnd, IDC_EDIT_LOCAL_PORT) ? IDC_EDIT_LOCAL_PORT : IDC_ADV_SRC_PORT_EDIT);
+            if (LOWORD(wParam) == IDC_CHECK_ANY_REMOTE_PORT)
+                editId = (GetDlgItem(hwnd, IDC_EDIT_REMOTE_PORT) ? IDC_EDIT_REMOTE_PORT : IDC_ADV_DST_PORT_EDIT);
+            if (LOWORD(wParam) == IDC_CHECK_ANY_LOCAL_IP)
+                editId = (GetDlgItem(hwnd, IDC_EDIT_LOCAL_IP) ? IDC_EDIT_LOCAL_IP : IDC_ADV_SRC_IP_EDIT);
+            if (LOWORD(wParam) == IDC_CHECK_ANY_REMOTE_IP)
+                editId = (GetDlgItem(hwnd, IDC_EDIT_REMOTE_IP) ? IDC_EDIT_REMOTE_IP : IDC_ADV_DST_IP_EDIT);
+            if (HIWORD(wParam) == BN_CLICKED && editId) {
+                BOOL checked = IsDlgButtonChecked(hwnd, LOWORD(wParam)) == BST_CHECKED;
+                HWND edit = GetDlgItem(hwnd, editId);
+                if (edit) EnableWindow(edit, !checked);
+            }
+            break;
+        }
+        case IDC_BROWSE_APP:
+            if (HIWORD(wParam) == BN_CLICKED) self->BrowseForProgram(hwnd, IDC_APP_PATH_EDIT);
+            break;
+        case IDC_ADV_BROWSE_APP:
+            if (HIWORD(wParam) == BN_CLICKED) self->BrowseForProgram(hwnd, IDC_ADV_APP_PATH_EDIT);
+            break;
+        }
+    }
+    return FALSE;
 }

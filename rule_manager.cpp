@@ -19,6 +19,16 @@ RuleManager& RuleManager::Instance() {
     return instance;
 }
 
+std::wstring ProtocolToString(Protocol proto) {
+    switch (proto) {
+    case Protocol::ANY: return L"Любой";
+    case Protocol::TCP: return L"TCP";
+    case Protocol::UDP: return L"UDP";
+    case Protocol::ICMP: return L"ICMP";
+    default: return L"?";
+    }
+}
+
 void RuleManager::SetDirection(RuleDirection direction) {
     std::lock_guard<std::mutex> lock(ruleMutex);
     currentDirection = direction;
@@ -160,56 +170,42 @@ void FillRulesList(HWND hList) {
         lvi.mask = LVIF_TEXT;
         lvi.iItem = itemIndex;
 
-        // Название
-        lvi.iSubItem = 0;
+        lvi.iSubItem = 0; // Название
         lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.name).c_str());
         ListView_InsertItem(hList, &lvi);
 
-        // Состояние
-        lvi.iSubItem = 1;
-        lvi.pszText = const_cast<LPWSTR>(rule.enabled ? L"Вкл" : L"Выкл");
+        lvi.iSubItem = 1; // Состояние
+        static const wchar_t* enabledText[] = { L"Выкл", L"Вкл" };
+        lvi.pszText = const_cast<LPWSTR>(enabledText[rule.enabled ? 1 : 0]);
         ListView_SetItem(hList, &lvi);
 
-        // Действие
-        lvi.iSubItem = 2;
-        lvi.pszText = const_cast<LPWSTR>(rule.action == RuleAction::ALLOW ? L"Разрешить" : L"Запретить");
+        lvi.iSubItem = 2; // Действие
+        lvi.pszText = const_cast<LPWSTR>(rule.action == RuleAction::ALLOW ? L"Разрешить" : L"Блокировать");
         ListView_SetItem(hList, &lvi);
 
-        // Программа
-        lvi.iSubItem = 3;
+        lvi.iSubItem = 3; // Программа
         lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.appPath).c_str());
         ListView_SetItem(hList, &lvi);
 
-        // Локальный адрес
-        lvi.iSubItem = 4;
+        lvi.iSubItem = 4; // Локальный адрес
         lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.sourceIp).c_str());
         ListView_SetItem(hList, &lvi);
 
-        // Адрес назначения
-        lvi.iSubItem = 5;
+        lvi.iSubItem = 5; // Адрес назначения
         lvi.pszText = const_cast<LPWSTR>(Utf8ToWide(rule.destIp).c_str());
         ListView_SetItem(hList, &lvi);
 
-        // Протокол
-        lvi.iSubItem = 6;
-        std::wstring protocolStr;
-        switch (rule.protocol) {
-        case Protocol::TCP: protocolStr = L"TCP"; break;
-        case Protocol::UDP: protocolStr = L"UDP"; break;
-        case Protocol::ICMP: protocolStr = L"ICMP"; break;
-        default: protocolStr = L"Любой"; break;
-        }
+        lvi.iSubItem = 6; // Протокол
+        std::wstring protocolStr = ProtocolToString(rule.protocol);
         lvi.pszText = const_cast<LPWSTR>(protocolStr.c_str());
         ListView_SetItem(hList, &lvi);
 
-        // Локальный порт
-        lvi.iSubItem = 7;
-        lvi.pszText = const_cast<LPWSTR>(std::to_wstring(rule.sourcePort).c_str());
+        lvi.iSubItem = 7; // Локальный порт
+        lvi.pszText = const_cast<LPWSTR>(rule.sourcePort == 0 ? L"Любой" : std::to_wstring(rule.sourcePort).c_str());
         ListView_SetItem(hList, &lvi);
 
-        // Порт назначения
-        lvi.iSubItem = 8;
-        lvi.pszText = const_cast<LPWSTR>(std::to_wstring(rule.destPort).c_str());
+        lvi.iSubItem = 8; // Порт назначения
+        lvi.pszText = const_cast<LPWSTR>(rule.destPort == 0 ? L"Любой" : std::to_wstring(rule.destPort).c_str());
         ListView_SetItem(hList, &lvi);
 
         itemIndex++;
@@ -230,8 +226,12 @@ static void DeleteSelectedRule(HWND hList) {
 
 
 bool RuleManager::ShowAddRuleWizard(HWND hParent) {
-    Rule newRule;
-    return RuleWizard::ShowWizard(hParent, newRule);
+    Rule rule;
+    RuleWizard wizard(hParent, rule);
+    if (wizard.Show()) {
+        return AddRule(rule);
+    }
+    return false;
 }
 
 // Остальные методы класса RuleManager (AddRule, RemoveRule и т.д.) остаются без изменений

@@ -1,6 +1,6 @@
 #pragma once
-#include "rule.h"
 #include "rule_manager.h"
+#include "rule.h"
 #include <Windows.h>
 #include <memory>
 
@@ -16,39 +16,30 @@ public:
         PAGE_NAME,
         PAGE_COUNT
     };
-    static bool ShowWizard(HWND hParent, Rule& rule);
-    static bool EditRule(HWND parent, Rule& rule);
 
-private:
     RuleWizard(HWND hParent, Rule& rule);
     ~RuleWizard();
-    
-    static void ShowPage(WizardPage page);
-    static void UpdateButtons();
-    static void SetupPageControls();
 
-    static Rule* currentRule;
-    static bool isEditMode;
-    static WizardPage currentPage;
-    static int selectedType;
-    static HWND currentPageHwnd;
+    bool Show();
 
-    static INT_PTR CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-    static void InitDialog();
-    static void LoadRule();
-    static bool SaveRule();
-    static bool ValidateCurrentPage();
-    static void BrowseForProgram();
-    static bool SavePageData();
-    static int GetPageDialogId(WizardPage page);
-    static INT_PTR CALLBACK PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-    static RuleWizard* s_instance;
-
+private:
     HWND m_hwndParent;
     HWND m_hwndMain;
     HWND m_hwndCurrent;
     WizardPage m_currentPage;
-    Rule& m_rule;
+    Rule& m_ruleDraft;
     int m_selectedType;
+
+    void ShowPage(WizardPage page);
+    void GoToNextPage();
+    void GoToPrevPage();
+    bool ValidateCurrentPage();
+    bool ApplyPageData();
+    bool SaveRule(HWND hwnd);
+    void BrowseForProgram(HWND hwnd, int editId);
+    int GetPageDialogId(WizardPage page);
+    void UpdateButtons();
+
+    static INT_PTR CALLBACK DialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    static INT_PTR CALLBACK PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 };

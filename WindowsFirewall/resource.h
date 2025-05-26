@@ -33,6 +33,8 @@
 #define IDC_CLEAR_SAVED_PACKETS         1008
 #define IDC_OPEN_RULES					1009
 #define IDC_OPEN_SETTINGS				1010
+#define IDC_STOP_BLOCKER				1011
+#define IDC_BLOCKER_STATUS				1012
 
 #define IDD_SELECT_ADAPTER              2000
 #define IDC_ADAPTER_LIST                2001

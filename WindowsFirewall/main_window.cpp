@@ -12,6 +12,7 @@
 #include <psapi.h>
 #include <wbemidl.h>
 #include <comdef.h>
+#include <tlhelp32.h>
 #include "rule_manager.h"
 
 
@@ -26,6 +27,99 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 void MainWindow::OpenRulesDialog() {
     RuleManager::Instance().ShowRulesDialog(hwnd);
+}
+
+// Проверка, что процесс уже запущен
+bool IsBlockerRunning() {
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W entry = { sizeof(entry) };
+    bool found = false;
+    if (Process32FirstW(hSnapshot, &entry)) {
+        do {
+            if (_wcsicmp(entry.szExeFile, L"FirewallDaemon.exe") == 0) {
+                found = true;
+                break;
+            }
+        } while (Process32NextW(hSnapshot, &entry));
+    }
+    CloseHandle(hSnapshot);
+    return found;
+}
+
+std::wstring GetMyExecutableDir()
+{
+    wchar_t path[MAX_PATH];
+    GetModuleFileNameW(NULL, path, MAX_PATH);
+    std::wstring exePath(path);
+    size_t pos = exePath.find_last_of(L"\\/");
+    if (pos != std::wstring::npos)
+        exePath = exePath.substr(0, pos);
+
+    // Отладочное сообщение
+    std::wstring debugMsg = L"[DEBUG] GetMyExecutableDir: exe path = ";
+    debugMsg += path;
+    debugMsg += L", dir = ";
+    debugMsg += exePath;
+    OutputDebugStringW(debugMsg.c_str());
+    OutputDebugStringW(L"\n");
+    return exePath;
+}
+std::wstring GetDaemonPath()
+{
+    std::wstring exeDir = GetMyExecutableDir();
+    std::wstring daemonPath = exeDir + L"\\FirewallDaemon.exe";
+    std::wstring debugMsg = L"[DEBUG] GetDaemonPath: ";
+    debugMsg += daemonPath;
+    OutputDebugStringW(debugMsg.c_str());
+    OutputDebugStringW(L"\n");
+    return daemonPath;
+}
+// Запуск процесса-блокировщика
+void StartBlockerProcess()
+{
+    std::wstring daemonPath = GetDaemonPath();
+    if (daemonPath.empty()) return; // Не найден
+
+    if (IsBlockerRunning()) return;
+    STARTUPINFOW si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+    if (CreateProcessW(daemonPath.c_str(), NULL, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+}
+// Остановка процесса по имени
+void StopBlockerProcess() {
+    // 1. Открываем Event для сигнала остановки
+    HANDLE hStopEvent = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Global\\FirewallDaemonStopEvent");
+    if (hStopEvent) {
+        OutputDebugStringW(L"[DEBUG] StopBlockerProcess: Sending stop event to daemon...\n");
+        SetEvent(hStopEvent); // Сигнал демону корректно завершиться
+        CloseHandle(hStopEvent);
+    }
+    else {
+        OutputDebugStringW(L"[DEBUG] StopBlockerProcess: Stop event not found (daemon not running?)\n");
+        return;
+    }
+
+    // 2. (Опционально) ждем завершения процесса демона — ищем его по имени
+    bool processFound = false;
+    DWORD daemonPid = 0;
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W entry = { sizeof(entry) };
+        if (Process32FirstW(hSnapshot, &entry)) {
+            do {
+                if (_wcsicmp(entry.szExeFile, L"FirewallDaemon.exe") == 0) {
+                    processFound = true;
+                    daemonPid = entry.th32ProcessID;
+                    break;
+                }
+            } while (Process32NextW(hSnapshot, &entry));
+        }
+        CloseHandle(hSnapshot);
+    }
 }
 
 std::string GetDomainByIp(const std::string& ip) {
@@ -94,6 +188,7 @@ std::wstring MainWindow::StringToWString(const std::string& str) {
 }
 
 MainWindow::MainWindow() : hwnd(nullptr), hInstance(nullptr), adapterInfoLabel(nullptr) {
+    StartBlockerProcess();
 }
 
 MainWindow::~MainWindow() {
@@ -1558,6 +1653,9 @@ INT_PTR CALLBACK MainWindow::SettingsDialogProc(HWND hwndDlg, UINT uMsg, WPARAM 
             CheckRadioButton(hwndDlg, IDC_RADIO_ALL, IDC_RADIO_UDP, IDC_RADIO_UDP);
             break;
         }
+        // Обновить статус
+        SetDlgItemText(hwndDlg, IDC_BLOCKER_STATUS,
+            IsBlockerRunning() ? L"Статус: работает" : L"Статус: остановлен");
         return TRUE;
     }
     if (uMsg == WM_COMMAND) {
@@ -1573,6 +1671,13 @@ INT_PTR CALLBACK MainWindow::SettingsDialogProc(HWND hwndDlg, UINT uMsg, WPARAM 
                 window->settings.protocolFilter = ProtocolFilter::UDP;
             EndDialog(hwndDlg, IDOK);
             window->UpdateGroupedPackets();
+            return TRUE;
+        }
+        if (LOWORD(wParam) == IDC_STOP_BLOCKER) {
+            StopBlockerProcess();
+            Sleep(5000);
+            SetDlgItemText(hwndDlg, IDC_BLOCKER_STATUS, L"Статус: остановлен");
+            MessageBox(hwndDlg, L"Блокировщик остановлен", L"Информация", MB_OK | MB_ICONINFORMATION);
             return TRUE;
         }
         if (LOWORD(wParam) == IDCANCEL) {

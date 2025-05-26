@@ -45,6 +45,7 @@ PacketInterceptor::~PacketInterceptor() {
     }
     packetCallback = nullptr;
 }
+
 bool starts_with(const std::string& str, const std::string& prefix) {
     return str.size() >= prefix.size() && std::equal(prefix.begin(), prefix.end(), str.begin());
 }

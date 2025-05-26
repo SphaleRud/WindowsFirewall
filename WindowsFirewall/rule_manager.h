@@ -22,6 +22,8 @@ public:
     RuleManager(const RuleManager&) = delete;
     RuleManager& operator=(const RuleManager&) = delete;
 
+    void ApplyAllRules();
+
     static RuleManager& Instance();
 
     void SetDirection(RuleDirection direction);

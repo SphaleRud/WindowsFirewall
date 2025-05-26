@@ -1,0 +1,16 @@
+[
+  {
+    "action": "BLOCK",
+    "appPath": "",
+    "description": "Block outgoing ping to 8.8.8.8",
+    "destIp": "8.8.8.8",
+    "destPort": 0,
+    "direction": "Outbound",
+    "enabled": true,
+    "id": 12,
+    "name": "BlockPing8.8.8.8",
+    "protocol": "ICMP",
+    "sourceIp": "0.0.0.0",
+    "sourcePort": 0
+  }
+]

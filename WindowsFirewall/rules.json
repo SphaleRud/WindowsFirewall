@@ -1,30 +1,30 @@
 [
   {
-    "action": "ALLOW",
+    "action": "BLOCK",
     "appPath": "",
     "description": "",
-    "destIp": "0.0.0.0",
-    "destPort": 800,
-    "direction": "Outbound",
+    "destIp": "8.8.8.8",
+    "destPort": 0,
+    "direction": "Inbound",
     "enabled": true,
-    "id": 7,
-    "name": "Еуым",
+    "id": 10,
+    "name": "Test",
     "protocol": "ANY",
-    "sourceIp": "1.1.1.1",
-    "sourcePort": 90
+    "sourceIp": "0.0.0.0",
+    "sourcePort": 0
   },
   {
-    "action": "ALLOW",
-    "appPath": "E:\\Programs\\AIDA64-Extreme\\aida64.exe",
+    "action": "BLOCK",
+    "appPath": "",
     "description": "",
-    "destIp": "",
+    "destIp": "8.8.8.8",
     "destPort": 0,
     "direction": "Outbound",
     "enabled": true,
-    "id": 9,
-    "name": "XX",
+    "id": 11,
+    "name": "Test",
     "protocol": "ANY",
-    "sourceIp": "",
+    "sourceIp": "0.0.0.0",
     "sourcePort": 0
   }
 ]

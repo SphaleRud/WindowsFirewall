@@ -27,6 +27,7 @@ RuleManager::~RuleManager() = default;
 
 using nlohmann::json;
 
+
 // Сериализация Rule в json
 static std::string ProtocolToString(Protocol proto) {
     switch (proto) {
@@ -48,9 +49,22 @@ static RuleAction ActionFromString(const std::string& str) { return str == "ALLO
 static std::string DirectionToString(RuleDirection dir) { return dir == RuleDirection::Inbound ? "Inbound" : "Outbound"; }
 static RuleDirection DirectionFromString(const std::string& str) { return str == "Outbound" ? RuleDirection::Outbound : RuleDirection::Inbound; }
 
+std::wstring GetExecutableDir()
+{
+    wchar_t buf[MAX_PATH];
+    GetModuleFileNameW(NULL, buf, MAX_PATH);
+    std::wstring path(buf);
+    size_t pos = path.find_last_of(L"\\/");
+    if (pos != std::wstring::npos)
+        return path.substr(0, pos);
+    return L".";
+}
+
+std::wstring rulesPath = GetExecutableDir() + L"\\rules.json";
+
 bool RuleManager::SaveRulesToFile(const std::wstring& path) const {
     // Сохраняем только в файл с ASCII-именем
-    std::ofstream f("rules.json", std::ios::out | std::ios::trunc);
+    std::ofstream f(rulesPath, std::ios::out | std::ios::trunc);
     if (!f) {
         OutputDebugStringA("Не удалось создать rules.json!\n");
         return false;

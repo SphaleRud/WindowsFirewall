@@ -1,0 +1,7 @@
+﻿resource.h(40): warning RC4005: 'IDD_PACKET_PROPERTIES' : redefinition
+  
+resource.h(129): warning RC4005: 'IDC_RADIO_ALL' : redefinition
+  
+WindowsFirewall.rc(241): warning RC2182: duplicate dialog control ID 2
+  
+  WindowsFirewall.vcxproj -> D:\Desktop\WindowsFirewall\x64\Debug\WindowsFirewall.exe

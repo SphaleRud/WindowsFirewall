@@ -17,6 +17,23 @@ RuleWizard::RuleWizard(HWND hParent, Rule& rule)
     , m_ruleDraft(rule)
     , m_selectedType(0)
 {
+    if (!rule.appPath.empty() && rule.sourcePort == 0 && rule.destPort == 0 && rule.protocol == Protocol::ANY
+        && rule.sourceIp.empty() && rule.destIp.empty()) {
+        m_selectedType = 0; // По приложению
+    }
+    else if (rule.appPath.empty() && rule.protocol == Protocol::ANY
+        && (rule.sourcePort != 0 || rule.destPort != 0)
+        && rule.sourceIp.empty() && rule.destIp.empty()) {
+        m_selectedType = 1; // По порту
+    }
+    else if (rule.appPath.empty() && rule.sourcePort == 0 && rule.destPort == 0
+        && rule.protocol != Protocol::ANY
+        && rule.sourceIp.empty() && rule.destIp.empty()) {
+        m_selectedType = 2; // По протоколу
+    }
+    else {
+        m_selectedType = 3; // Пользовательские
+    }
 }
 
 RuleWizard::~RuleWizard() {}
@@ -435,7 +452,8 @@ INT_PTR CALLBACK RuleWizard::PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     RuleWizard* self = reinterpret_cast<RuleWizard*>(GetWindowLongPtr(GetParent(hwnd), GWLP_USERDATA));
     if (msg == WM_INITDIALOG) {
         SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
-        // Заполнение комбобокса типа правила (только на PAGE_TYPE)
+
+        // --- Комбобокс типа правила ---
         HWND ruleTypeCombo = GetDlgItem(hwnd, IDC_RULE_TYPE_COMBO);
         if (ruleTypeCombo) {
             ComboBox_ResetContent(ruleTypeCombo);
@@ -443,9 +461,101 @@ INT_PTR CALLBACK RuleWizard::PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             ComboBox_AddString(ruleTypeCombo, L"По порту");
             ComboBox_AddString(ruleTypeCombo, L"По протоколу");
             ComboBox_AddString(ruleTypeCombo, L"Пользовательские");
-            ComboBox_SetCurSel(ruleTypeCombo, self ? self->m_selectedType : 0);
+            if (self) ComboBox_SetCurSel(ruleTypeCombo, self->m_selectedType);
         }
-        // Заполнение комбобоксов протоколов (для всех страниц, где они есть)
+
+        // --- Имя и описание (PAGE_NAME) ---
+        HWND nameEdit = GetDlgItem(hwnd, IDC_RULE_NAME_EDIT);
+        if (nameEdit) {
+            SetDlgItemText(hwnd, IDC_RULE_NAME_EDIT, Utf8ToWide(self->m_ruleDraft.name).c_str());
+        }
+        HWND descEdit = GetDlgItem(hwnd, IDC_RULE_DESC_EDIT);
+        if (descEdit) {
+            SetDlgItemText(hwnd, IDC_RULE_DESC_EDIT, Utf8ToWide(self->m_ruleDraft.description).c_str());
+        }
+
+        // --- Поля приложения (PAGE_PARAMS_APP, PAGE_PARAMS_ADVANCED) ---
+        HWND appPathEdit = GetDlgItem(hwnd, IDC_APP_PATH_EDIT);
+        if (appPathEdit) {
+            SetDlgItemText(hwnd, IDC_APP_PATH_EDIT, Utf8ToWide(self->m_ruleDraft.appPath).c_str());
+        }
+        HWND advAppPathEdit = GetDlgItem(hwnd, IDC_ADV_APP_PATH_EDIT);
+        if (advAppPathEdit) {
+            SetDlgItemText(hwnd, IDC_ADV_APP_PATH_EDIT, Utf8ToWide(self->m_ruleDraft.appPath).c_str());
+        }
+
+        HWND portEdit = GetDlgItem(hwnd, IDC_PORT_EDIT);
+        if (portEdit) {
+            if (self->m_ruleDraft.sourcePort != 0)
+                SetDlgItemText(hwnd, IDC_PORT_EDIT, std::to_wstring(self->m_ruleDraft.sourcePort).c_str());
+            else
+                SetDlgItemText(hwnd, IDC_PORT_EDIT, L"");
+        }
+
+        // --- Адреса и порты (PAGE_PARAMS_PROTO, PAGE_PARAMS_ADVANCED) ---
+        HWND editLocalIp = GetDlgItem(hwnd, IDC_EDIT_LOCAL_IP);
+        if (editLocalIp) {
+            SetDlgItemText(hwnd, IDC_EDIT_LOCAL_IP, Utf8ToWide(self->m_ruleDraft.sourceIp).c_str());
+            CheckDlgButton(hwnd, IDC_CHECK_ANY_LOCAL_IP, (self->m_ruleDraft.sourceIp.empty() || self->m_ruleDraft.sourceIp == "0.0.0.0") ? BST_CHECKED : BST_UNCHECKED);
+            EnableWindow(editLocalIp, !(self->m_ruleDraft.sourceIp.empty() || self->m_ruleDraft.sourceIp == "0.0.0.0"));
+        }
+        HWND editRemoteIp = GetDlgItem(hwnd, IDC_EDIT_REMOTE_IP);
+        if (editRemoteIp) {
+            SetDlgItemText(hwnd, IDC_EDIT_REMOTE_IP, Utf8ToWide(self->m_ruleDraft.destIp).c_str());
+            CheckDlgButton(hwnd, IDC_CHECK_ANY_REMOTE_IP, (self->m_ruleDraft.destIp.empty() || self->m_ruleDraft.destIp == "0.0.0.0") ? BST_CHECKED : BST_UNCHECKED);
+            EnableWindow(editRemoteIp, !(self->m_ruleDraft.destIp.empty() || self->m_ruleDraft.destIp == "0.0.0.0"));
+        }
+        HWND advSrcIpEdit = GetDlgItem(hwnd, IDC_ADV_SRC_IP_EDIT);
+        if (advSrcIpEdit) {
+            SetDlgItemText(hwnd, IDC_ADV_SRC_IP_EDIT, Utf8ToWide(self->m_ruleDraft.sourceIp).c_str());
+            CheckDlgButton(hwnd, IDC_CHECK_ANY_LOCAL_IP, (self->m_ruleDraft.sourceIp.empty() || self->m_ruleDraft.sourceIp == "0.0.0.0") ? BST_CHECKED : BST_UNCHECKED);
+            EnableWindow(advSrcIpEdit, !(self->m_ruleDraft.sourceIp.empty() || self->m_ruleDraft.sourceIp == "0.0.0.0"));
+        }
+        HWND advDstIpEdit = GetDlgItem(hwnd, IDC_ADV_DST_IP_EDIT);
+        if (advDstIpEdit) {
+            SetDlgItemText(hwnd, IDC_ADV_DST_IP_EDIT, Utf8ToWide(self->m_ruleDraft.destIp).c_str());
+            CheckDlgButton(hwnd, IDC_CHECK_ANY_REMOTE_IP, (self->m_ruleDraft.destIp.empty() || self->m_ruleDraft.destIp == "0.0.0.0") ? BST_CHECKED : BST_UNCHECKED);
+            EnableWindow(advDstIpEdit, !(self->m_ruleDraft.destIp.empty() || self->m_ruleDraft.destIp == "0.0.0.0"));
+        }
+
+        HWND editLocalPort = GetDlgItem(hwnd, IDC_EDIT_LOCAL_PORT);
+        if (editLocalPort) {
+            if (self->m_ruleDraft.sourcePort != 0)
+                SetDlgItemText(hwnd, IDC_EDIT_LOCAL_PORT, std::to_wstring(self->m_ruleDraft.sourcePort).c_str());
+            else
+                SetDlgItemText(hwnd, IDC_EDIT_LOCAL_PORT, L"");
+            CheckDlgButton(hwnd, IDC_CHECK_ANY_LOCAL_PORT, self->m_ruleDraft.sourcePort == 0 ? BST_CHECKED : BST_UNCHECKED);
+            EnableWindow(editLocalPort, self->m_ruleDraft.sourcePort != 0);
+        }
+        HWND editRemotePort = GetDlgItem(hwnd, IDC_EDIT_REMOTE_PORT);
+        if (editRemotePort) {
+            if (self->m_ruleDraft.destPort != 0)
+                SetDlgItemText(hwnd, IDC_EDIT_REMOTE_PORT, std::to_wstring(self->m_ruleDraft.destPort).c_str());
+            else
+                SetDlgItemText(hwnd, IDC_EDIT_REMOTE_PORT, L"");
+            CheckDlgButton(hwnd, IDC_CHECK_ANY_REMOTE_PORT, self->m_ruleDraft.destPort == 0 ? BST_CHECKED : BST_UNCHECKED);
+            EnableWindow(editRemotePort, self->m_ruleDraft.destPort != 0);
+        }
+        HWND advSrcPortEdit = GetDlgItem(hwnd, IDC_ADV_SRC_PORT_EDIT);
+        if (advSrcPortEdit) {
+            if (self->m_ruleDraft.sourcePort != 0)
+                SetDlgItemText(hwnd, IDC_ADV_SRC_PORT_EDIT, std::to_wstring(self->m_ruleDraft.sourcePort).c_str());
+            else
+                SetDlgItemText(hwnd, IDC_ADV_SRC_PORT_EDIT, L"");
+            CheckDlgButton(hwnd, IDC_CHECK_ANY_LOCAL_PORT, self->m_ruleDraft.sourcePort == 0 ? BST_CHECKED : BST_UNCHECKED);
+            EnableWindow(advSrcPortEdit, self->m_ruleDraft.sourcePort != 0);
+        }
+        HWND advDstPortEdit = GetDlgItem(hwnd, IDC_ADV_DST_PORT_EDIT);
+        if (advDstPortEdit) {
+            if (self->m_ruleDraft.destPort != 0)
+                SetDlgItemText(hwnd, IDC_ADV_DST_PORT_EDIT, std::to_wstring(self->m_ruleDraft.destPort).c_str());
+            else
+                SetDlgItemText(hwnd, IDC_ADV_DST_PORT_EDIT, L"");
+            CheckDlgButton(hwnd, IDC_CHECK_ANY_REMOTE_PORT, self->m_ruleDraft.destPort == 0 ? BST_CHECKED : BST_UNCHECKED);
+            EnableWindow(advDstPortEdit, self->m_ruleDraft.destPort != 0);
+        }
+
+        // --- Протоколы (PAGE_PARAMS_PROTO, PAGE_PARAMS_ADVANCED) ---
         HWND protoCombo = GetDlgItem(hwnd, IDC_PROTOCOL_COMBO);
         if (protoCombo) {
             ComboBox_ResetContent(protoCombo);
@@ -453,7 +563,7 @@ INT_PTR CALLBACK RuleWizard::PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             ComboBox_AddString(protoCombo, L"TCP");
             ComboBox_AddString(protoCombo, L"UDP");
             ComboBox_AddString(protoCombo, L"ICMP");
-            ComboBox_SetCurSel(protoCombo, 0);
+            ComboBox_SetCurSel(protoCombo, static_cast<int>(self->m_ruleDraft.protocol));
         }
         HWND comboProto = GetDlgItem(hwnd, IDC_COMBO_PROTOCOL);
         if (comboProto) {
@@ -462,7 +572,7 @@ INT_PTR CALLBACK RuleWizard::PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             ComboBox_AddString(comboProto, L"TCP");
             ComboBox_AddString(comboProto, L"UDP");
             ComboBox_AddString(comboProto, L"ICMP");
-            ComboBox_SetCurSel(comboProto, 0);
+            ComboBox_SetCurSel(comboProto, static_cast<int>(self->m_ruleDraft.protocol));
         }
         HWND advProtoCombo = GetDlgItem(hwnd, IDC_ADV_PROTO_COMBO);
         if (advProtoCombo) {
@@ -471,8 +581,17 @@ INT_PTR CALLBACK RuleWizard::PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             ComboBox_AddString(advProtoCombo, L"TCP");
             ComboBox_AddString(advProtoCombo, L"UDP");
             ComboBox_AddString(advProtoCombo, L"ICMP");
-            ComboBox_SetCurSel(advProtoCombo, 0);
+            ComboBox_SetCurSel(advProtoCombo, static_cast<int>(self->m_ruleDraft.protocol));
         }
+
+        // --- Действие (разрешить/запретить) (PAGE_ACTION) ---
+        HWND allowRadio = GetDlgItem(hwnd, IDC_RULE_ALLOW_RADIO);
+        HWND blockRadio = GetDlgItem(hwnd, IDC_RULE_BLOCK_RADIO);
+        if (allowRadio && blockRadio) {
+            CheckRadioButton(hwnd, IDC_RULE_ALLOW_RADIO, IDC_RULE_BLOCK_RADIO,
+                self->m_ruleDraft.action == RuleAction::ALLOW ? IDC_RULE_ALLOW_RADIO : IDC_RULE_BLOCK_RADIO);
+        }
+
         return TRUE;
     }
     if (msg == WM_COMMAND) {

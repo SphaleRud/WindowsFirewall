@@ -1,6 +1,6 @@
+#include <windows.h>
 #include "rule_manager.h"
 #include "Resource.h"
-#include <commctrl.h>
 #include <algorithm>
 #include <shobjidl.h>
 #include <string>
@@ -12,6 +12,13 @@
 #include "string_utils.h" 
 #include "validator.h"
 #include "rule_wizard.h"
+#include <commctrl.h>
+
+#pragma comment(lib, "comctl32.lib")
+
+#ifndef LVS_FULLROWSELECT
+#define LVS_FULLROWSELECT 0x00000020
+#endif
 
 RuleManager::RuleManager() {
     LoadRulesFromFile();
@@ -49,9 +56,6 @@ bool RuleManager::SaveRulesToFile(const std::wstring& path) const {
         return false;
     }
     OutputDebugStringA("rules.json успешно открыт для записи.\n");
-    char buf[MAX_PATH];
-    GetCurrentDirectoryA(MAX_PATH, buf);
-    MessageBoxA(0, buf, "CurrentDirectory", MB_OK);
     json arr = json::array();
     for (const auto& r : rules) {
         arr.push_back({
@@ -291,6 +295,9 @@ static void DeleteSelectedRule(HWND hList) {
 
 bool RuleManager::ShowAddRuleWizard(HWND hParent) {
     Rule rule;
+
+    rule.direction = GetCurrentDirection();
+
     RuleWizard wizard(hParent, rule);
     if (wizard.Show()) {
         OutputDebugStringA(("Added rule: name=" + rule.name + " srcIP=" + rule.sourceIp + " appPath=" + rule.appPath + "\n").c_str());
@@ -315,6 +322,14 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
 
         hList = GetDlgItem(hwndDlg, IDC_RULES_LIST);
 
+        // Устанавливаем стиль выделения всей строки и разрешаем множественный выбор
+        LONG_PTR style = GetWindowLongPtr(hList, GWL_STYLE);
+        style |= LVS_FULLROWSELECT;
+        style &= ~LVS_SINGLESEL; // разрешить множественный выбор
+        SetWindowLongPtr(hList, GWL_STYLE, style);
+
+        // Включаем расширенный стиль выделения всей строки
+        SendMessage(hList, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_FULLROWSELECT, LVS_EX_FULLROWSELECT);
         LVCOLUMN lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
         lvc.cx = 80;  lvc.pszText = const_cast<LPWSTR>(L"Протокол");   ListView_InsertColumn(hList, 0, &lvc);
@@ -390,13 +405,34 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
             }
             return TRUE;
         case ID_DELETE_RULE: {
-            int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
-            if (sel == -1) break;
-            auto rules = RuleManager::Instance().GetRules();
-            if (sel >= 0 && sel < (int)rules.size()) {
-                if (MessageBox(hwndDlg, L"Удалить выбранное правило?", L"Подтверждение", MB_YESNO | MB_ICONQUESTION) == IDYES) {
-                    int ruleId = rules[sel].id;
-                    RuleManager::Instance().RemoveRule(ruleId);
+            // Получаем все правила только для текущей вкладки
+            auto allRules = RuleManager::Instance().GetRules();
+            RuleDirection currentDirection = RuleManager::Instance().GetCurrentDirection();
+            std::vector<Rule> filteredRules;
+            for (const auto& rule : allRules) {
+                if (rule.direction == currentDirection)
+                    filteredRules.push_back(rule);
+            }
+
+            // Собирать индексы всех выделенных строк
+            std::vector<int> selectedIndexes;
+            int sel = -1;
+            while ((sel = ListView_GetNextItem(hList, sel, LVNI_SELECTED)) != -1) {
+                selectedIndexes.push_back(sel);
+            }
+
+            if (!selectedIndexes.empty()) {
+                if (MessageBox(hwndDlg, L"Удалить выбранные правила?", L"Подтверждение", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+                    // Собрать ID всех выбранных правил
+                    std::vector<int> ruleIdsToDelete;
+                    for (int idx : selectedIndexes) {
+                        if (idx >= 0 && idx < (int)filteredRules.size())
+                            ruleIdsToDelete.push_back(filteredRules[idx].id);
+                    }
+                    // Удалить все выбранные правила
+                    for (int ruleId : ruleIdsToDelete) {
+                        RuleManager::Instance().RemoveRule(ruleId);
+                    }
                     FillRulesList(hList);
                 }
             }
@@ -405,9 +441,18 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
         case ID_EDIT_RULE: {
             int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
             if (sel == -1) break;
-            auto rules = RuleManager::Instance().GetRules();
-            if (sel >= 0 && sel < (int)rules.size()) {
-                int ruleId = rules[sel].id;
+
+            // Получаем правила только для текущей вкладки
+            auto allRules = RuleManager::Instance().GetRules();
+            RuleDirection currentDirection = RuleManager::Instance().GetCurrentDirection();
+            std::vector<Rule> filteredRules;
+            for (const auto& rule : allRules) {
+                if (rule.direction == currentDirection)
+                    filteredRules.push_back(rule);
+            }
+
+            if (sel >= 0 && sel < (int)filteredRules.size()) {
+                int ruleId = filteredRules[sel].id;
                 auto ruleOpt = RuleManager::Instance().GetRuleById(ruleId);
                 if (ruleOpt) {
                     Rule rule = *ruleOpt;

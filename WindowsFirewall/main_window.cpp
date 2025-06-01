@@ -1675,7 +1675,7 @@ INT_PTR CALLBACK MainWindow::SettingsDialogProc(HWND hwndDlg, UINT uMsg, WPARAM 
         }
         if (LOWORD(wParam) == IDC_STOP_BLOCKER) {
             StopBlockerProcess();
-            Sleep(5000);
+            Sleep(3000);
             SetDlgItemText(hwndDlg, IDC_BLOCKER_STATUS, L"Статус: остановлен");
             MessageBox(hwndDlg, L"Блокировщик остановлен", L"Информация", MB_OK | MB_ICONINFORMATION);
             return TRUE;

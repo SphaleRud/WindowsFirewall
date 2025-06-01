@@ -27,7 +27,6 @@ RuleManager::~RuleManager() = default;
 
 using nlohmann::json;
 
-
 // Сериализация Rule в json
 static std::string ProtocolToString(Protocol proto) {
     switch (proto) {
@@ -63,7 +62,6 @@ std::wstring GetExecutableDir()
 std::wstring rulesPath = GetExecutableDir() + L"\\rules.json";
 
 bool RuleManager::SaveRulesToFile(const std::wstring& path) const {
-    // Сохраняем только в файл с ASCII-именем
     std::ofstream f(rulesPath, std::ios::out | std::ios::trunc);
     if (!f) {
         OutputDebugStringA("Не удалось создать rules.json!\n");
@@ -176,11 +174,9 @@ std::optional<Rule> RuleManager::GetRuleById(int ruleId) const {
     return std::nullopt;
 }
 
-
 bool RuleManager::IsAllowed(const Connection& connection, int& matchedRuleId) {
     std::lock_guard<std::mutex> lock(ruleMutex);
     matchedRuleId = -1;
-
     for (const auto& rule : rules) {
         if (!rule.enabled) continue;
 
@@ -195,7 +191,6 @@ bool RuleManager::IsAllowed(const Connection& connection, int& matchedRuleId) {
             return rule.action == RuleAction::ALLOW;
         }
     }
-
     return true; // Разрешить по умолчанию, если не найдено подходящее правило
 }
 
@@ -253,65 +248,75 @@ void FillRulesList(HWND hList) {
         ListView_InsertColumn(hList, i, &lvc);
     }
 
-    // Получаем правила и текущее направление
     auto rules = RuleManager::Instance().GetRules();
     auto currentDirection = RuleManager::Instance().GetCurrentDirection();
 
-    std::vector<std::vector<std::wstring>> allStrings;
+    // Фильтрация
+    std::vector<Rule> filteredRules;
+    for (const auto& rule : rules) {
+        if (rule.direction == currentDirection)
+            filteredRules.push_back(rule);
+    }
+
+    // Сортировка!
+    std::sort(filteredRules.begin(), filteredRules.end(), [](const Rule& a, const Rule& b) {
+        return a.id < b.id; // по возрастанию id
+        });
 
     int itemIndex = 0;
-    for (const auto& rule : rules) {
-        if (rule.direction != currentDirection)
-            continue;
-
-        std::vector<std::wstring> itemStrings;
-        itemStrings.push_back(Utf8ToWide(rule.name));
-        itemStrings.push_back(rule.enabled ? L"Вкл" : L"Выкл");
-        itemStrings.push_back(rule.action == RuleAction::ALLOW ? L"Разрешить" : L"Блокировать");
-        itemStrings.push_back(Utf8ToWide(rule.appPath));
-        itemStrings.push_back(Utf8ToWide(rule.sourceIp));
-        itemStrings.push_back(Utf8ToWide(rule.destIp));
-        itemStrings.push_back(Utf8ToWide(ProtocolToString(rule.protocol)));
-        itemStrings.push_back(rule.sourcePort == 0 ? L"Любой" : std::to_wstring(rule.sourcePort));
-        itemStrings.push_back(rule.destPort == 0 ? L"Любой" : std::to_wstring(rule.destPort));
-
-        allStrings.push_back(std::move(itemStrings));
-        auto& strings = allStrings.back();
+    for (const auto& rule : filteredRules) {
+        std::wstring values[9];
+        values[0] = Utf8ToWide(rule.name);
+        values[1] = rule.enabled ? L"Вкл" : L"Выкл";
+        values[2] = rule.action == RuleAction::ALLOW ? L"Разрешить" : L"Блокировать";
+        values[3] = Utf8ToWide(rule.appPath);
+        values[4] = Utf8ToWide(rule.sourceIp);
+        values[5] = Utf8ToWide(rule.destIp);
+        values[6] = Utf8ToWide(ProtocolToString(rule.protocol));
+        values[7] = rule.sourcePort == 0 ? L"Любой" : std::to_wstring(rule.sourcePort);
+        values[8] = rule.destPort == 0 ? L"Любой" : std::to_wstring(rule.destPort);
 
         LVITEM lvi = { 0 };
-        lvi.mask = LVIF_TEXT;
+        lvi.mask = LVIF_TEXT | LVIF_PARAM;
         lvi.iItem = itemIndex;
         lvi.iSubItem = 0;
-        lvi.pszText = (LPWSTR)strings[0].c_str();
+        lvi.pszText = (LPWSTR)values[0].c_str();
+        lvi.lParam = rule.id;
         ListView_InsertItem(hList, &lvi);
 
         for (int i = 1; i < 9; ++i) {
-            lvi.iSubItem = i;
-            lvi.pszText = (LPWSTR)strings[i].c_str();
-            ListView_SetItem(hList, &lvi);
+            LVITEM subLvi = { 0 };
+            subLvi.mask = LVIF_TEXT;
+            subLvi.iItem = itemIndex;
+            subLvi.iSubItem = i;
+            subLvi.pszText = (LPWSTR)values[i].c_str();
+            ListView_SetItem(hList, &subLvi);
         }
         itemIndex++;
     }
+    ListView_SortItems(hList, NULL, 0);
 }
 
+// Удаление выбранных правил по lParam (id)
 static void DeleteSelectedRule(HWND hList) {
-    int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
-    if (sel == -1) return;
-    auto rules = RuleManager::Instance().GetRules();
-    if (sel >= 0 && sel < (int)rules.size()) {
-        int ruleId = rules[sel].id;
+    std::vector<int> ruleIdsToDelete;
+    int sel = -1;
+    while ((sel = ListView_GetNextItem(hList, sel, LVNI_SELECTED)) != -1) {
+        LVITEM lvi = { 0 };
+        lvi.iItem = sel;
+        lvi.mask = LVIF_PARAM;
+        if (ListView_GetItem(hList, &lvi)) {
+            ruleIdsToDelete.push_back((int)lvi.lParam);
+        }
+    }
+    for (int ruleId : ruleIdsToDelete) {
         RuleManager::Instance().RemoveRule(ruleId);
     }
 }
 
-
-
-
 bool RuleManager::ShowAddRuleWizard(HWND hParent) {
     Rule rule;
-
     rule.direction = GetCurrentDirection();
-
     RuleWizard wizard(hParent, rule);
     if (wizard.Show()) {
         OutputDebugStringA(("Added rule: name=" + rule.name + " srcIP=" + rule.sourceIp + " appPath=" + rule.appPath + "\n").c_str());
@@ -319,8 +324,6 @@ bool RuleManager::ShowAddRuleWizard(HWND hParent) {
     }
     return false;
 }
-
-// Остальные методы класса RuleManager (AddRule, RemoveRule и т.д.) остаются без изменений
 
 // --- Диалог списка правил ---
 INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -357,16 +360,13 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
         FillRulesList(hList);
         return TRUE;
     }
-    case WM_CONTEXTMENU: // Отрабатывает правый клик по любому контролу
-    {
+    case WM_CONTEXTMENU: {
         HWND hwndFrom = (HWND)wParam;
         if (hwndFrom == hList) {
-            // Получить позицию курсора
             POINT pt;
             pt.x = LOWORD(lParam);
             pt.y = HIWORD(lParam);
 
-            // Если клик по клавише, то получить позицию выделенного
             if (pt.x == -1 && pt.y == -1) {
                 int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
                 if (sel != -1) {
@@ -383,10 +383,8 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
 
             int cmd = TrackPopupMenu(hSubMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwndDlg, NULL);
 
-            // Освободить меню
             DestroyMenu(hMenu);
 
-            // Обработать команду
             switch (cmd) {
             case ID_CONTEXT_EDIT:
                 PostMessage(hwndDlg, WM_COMMAND, ID_EDIT_RULE, 0);
@@ -419,36 +417,9 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
             }
             return TRUE;
         case ID_DELETE_RULE: {
-            // Получаем все правила только для текущей вкладки
-            auto allRules = RuleManager::Instance().GetRules();
-            RuleDirection currentDirection = RuleManager::Instance().GetCurrentDirection();
-            std::vector<Rule> filteredRules;
-            for (const auto& rule : allRules) {
-                if (rule.direction == currentDirection)
-                    filteredRules.push_back(rule);
-            }
-
-            // Собирать индексы всех выделенных строк
-            std::vector<int> selectedIndexes;
-            int sel = -1;
-            while ((sel = ListView_GetNextItem(hList, sel, LVNI_SELECTED)) != -1) {
-                selectedIndexes.push_back(sel);
-            }
-
-            if (!selectedIndexes.empty()) {
-                if (MessageBox(hwndDlg, L"Удалить выбранные правила?", L"Подтверждение", MB_YESNO | MB_ICONQUESTION) == IDYES) {
-                    // Собрать ID всех выбранных правил
-                    std::vector<int> ruleIdsToDelete;
-                    for (int idx : selectedIndexes) {
-                        if (idx >= 0 && idx < (int)filteredRules.size())
-                            ruleIdsToDelete.push_back(filteredRules[idx].id);
-                    }
-                    // Удалить все выбранные правила
-                    for (int ruleId : ruleIdsToDelete) {
-                        RuleManager::Instance().RemoveRule(ruleId);
-                    }
-                    FillRulesList(hList);
-                }
+            if (MessageBox(hwndDlg, L"Удалить выбранные правила?", L"Подтверждение", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+                DeleteSelectedRule(hList);
+                FillRulesList(hList);
             }
             break;
         }
@@ -456,25 +427,20 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
             int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
             if (sel == -1) break;
 
-            // Получаем правила только для текущей вкладки
-            auto allRules = RuleManager::Instance().GetRules();
-            RuleDirection currentDirection = RuleManager::Instance().GetCurrentDirection();
-            std::vector<Rule> filteredRules;
-            for (const auto& rule : allRules) {
-                if (rule.direction == currentDirection)
-                    filteredRules.push_back(rule);
-            }
+            LVITEM lvi = { 0 };
+            lvi.iItem = sel;
+            lvi.mask = LVIF_PARAM;
+            if (!ListView_GetItem(hList, &lvi))
+                break;
+            int ruleId = (int)lvi.lParam;
 
-            if (sel >= 0 && sel < (int)filteredRules.size()) {
-                int ruleId = filteredRules[sel].id;
-                auto ruleOpt = RuleManager::Instance().GetRuleById(ruleId);
-                if (ruleOpt) {
-                    Rule rule = *ruleOpt;
-                    RuleWizard wizard(hwndDlg, rule); // hwndDlg — родительское окно
-                    if (wizard.Show()) {
-                        RuleManager::Instance().UpdateRule(rule);
-                        FillRulesList(hList);
-                    }
+            auto ruleOpt = RuleManager::Instance().GetRuleById(ruleId);
+            if (ruleOpt) {
+                Rule rule = *ruleOpt;
+                RuleWizard wizard(hwndDlg, rule);
+                if (wizard.Show()) {
+                    RuleManager::Instance().UpdateRule(rule);
+                    FillRulesList(hList);
                 }
             }
             break;
@@ -482,16 +448,19 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
         case ID_TOGGLE_RULE: {
             int sel = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
             if (sel == -1) break;
-            auto rules = RuleManager::Instance().GetRules();
-            if (sel >= 0 && sel < (int)rules.size()) {
-                int ruleId = rules[sel].id;
-                auto ruleOpt = RuleManager::Instance().GetRuleById(ruleId);
-                if (ruleOpt) {
-                    Rule rule = *ruleOpt;
-                    rule.enabled = !rule.enabled;
-                    RuleManager::Instance().UpdateRule(rule);
-                    FillRulesList(hList);
-                }
+            LVITEM lvi = { 0 };
+            lvi.iItem = sel;
+            lvi.mask = LVIF_PARAM;
+            if (!ListView_GetItem(hList, &lvi))
+                break;
+            int ruleId = (int)lvi.lParam;
+
+            auto ruleOpt = RuleManager::Instance().GetRuleById(ruleId);
+            if (ruleOpt) {
+                Rule rule = *ruleOpt;
+                rule.enabled = !rule.enabled;
+                RuleManager::Instance().UpdateRule(rule);
+                FillRulesList(hList);
             }
             break;
         }
@@ -502,6 +471,5 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
         }
         break;
     }
-
     return FALSE;
 }

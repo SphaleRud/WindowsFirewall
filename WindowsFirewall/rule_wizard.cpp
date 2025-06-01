@@ -331,7 +331,7 @@ bool RuleWizard::ApplyPageData() {
         break;
     case PAGE_PARAMS_PORT:
         GetDlgItemText(m_hwndCurrent, IDC_PORT_EDIT, buffer, MAX_PATH);
-        m_ruleDraft.sourcePort = _wtoi(buffer);
+        m_ruleDraft.destPort = _wtoi(buffer);
         break;
     case PAGE_PARAMS_PROTO: {
         // Протокол
@@ -486,8 +486,8 @@ INT_PTR CALLBACK RuleWizard::PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
 
         HWND portEdit = GetDlgItem(hwnd, IDC_PORT_EDIT);
         if (portEdit) {
-            if (self->m_ruleDraft.sourcePort != 0)
-                SetDlgItemText(hwnd, IDC_PORT_EDIT, std::to_wstring(self->m_ruleDraft.sourcePort).c_str());
+            if (self->m_ruleDraft.destPort != 0)
+                SetDlgItemText(hwnd, IDC_PORT_EDIT, std::to_wstring(self->m_ruleDraft.destPort).c_str());
             else
                 SetDlgItemText(hwnd, IDC_PORT_EDIT, L"");
         }

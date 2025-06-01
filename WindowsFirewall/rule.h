@@ -65,6 +65,6 @@ public:
     RuleAction action;
     bool enabled;
     RuleDirection direction;
-    std::string creator;        // Добавлено: имя создателя правила
-    std::string creationTime;   // Добавлено: время создания в UTC
+    std::string creator;
+    std::string creationTime;
 };

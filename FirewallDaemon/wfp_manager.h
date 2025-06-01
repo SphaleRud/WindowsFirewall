@@ -12,13 +12,14 @@ public:
 
     bool Initialize();
     void RemoveAllRules();
-    bool AddRule(const Rule& rule);
+    bool AddRule(const Rule& rule, bool isChildRule);
     bool ApplyRules(const std::vector<Rule>& rules);
     HANDLE GetEngineHandle() const { return engineHandle; }
 private:
     HANDLE engineHandle;
     std::vector<UINT64> addedFilterIds;
     static UINT8 ProtocolToNumber(Protocol proto);
+    std::string ProtocolToString(Protocol proto);
 
 
     static bool MakeAppIdBlob(const std::string& appPath, std::vector<uint8_t>& appIdBlob);

@@ -1,2 +1,36 @@
-﻿  wfp_manager.cpp
+﻿  rule_manager.cpp
+D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
+  (compiling source file '../WindowsFirewall/rule_manager.cpp')
+      D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(25,9):
+      see previous definition of 'IDD_PACKET_PROPERTIES'
+  
+D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(44,9): warning C4005: 'IDC_SIZE': macro redefinition
+  (compiling source file '../WindowsFirewall/rule_manager.cpp')
+      C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winuser.h(10685,9):
+      see previous definition of 'IDC_SIZE'
+  
+D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(131,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
+  (compiling source file '../WindowsFirewall/rule_manager.cpp')
+      D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(127,9):
+      see previous definition of 'IDC_RADIO_ALL'
+  
+  rule_wizard.cpp
+D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
+  (compiling source file '../WindowsFirewall/rule_wizard.cpp')
+      D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(25,9):
+      see previous definition of 'IDD_PACKET_PROPERTIES'
+  
+D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(44,9): warning C4005: 'IDC_SIZE': macro redefinition
+  (compiling source file '../WindowsFirewall/rule_wizard.cpp')
+      C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winuser.h(10685,9):
+      see previous definition of 'IDC_SIZE'
+  
+D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(131,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
+  (compiling source file '../WindowsFirewall/rule_wizard.cpp')
+      D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(127,9):
+      see previous definition of 'IDC_RADIO_ALL'
+  
+  FirewallDaemon.cpp
+  wfp_manager.cpp
+  Generating Code...
   FirewallDaemon.vcxproj -> D:\Desktop\WindowsFirewall\x64\Debug\FirewallDaemon.exe

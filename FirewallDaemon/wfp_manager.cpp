@@ -7,6 +7,7 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include "string_utils.h"
 
 #pragma comment(lib, "fwpuclnt.lib")
 #pragma comment(lib, "Ws2_32.lib")
@@ -35,6 +36,92 @@ bool WfpFilterManager::Initialize() {
     return true;
 }
 
+struct ResolvedIPs {
+    bool success;
+    std::vector<std::string> ipAddresses;
+    std::string error;
+};
+
+ResolvedIPs ResolveDomain(const std::string& domain) {
+    ResolvedIPs result;
+    result.success = false;
+
+    std::cout << "[DNS] Starting resolution for domain: " << domain << std::endl;
+
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        result.error = "Failed to initialize WinSock";
+        std::cerr << "[DNS] " << result.error << std::endl;
+        return result;
+    }
+
+    try {
+        struct addrinfo hints = { 0 };
+        struct addrinfo* addrs = nullptr;
+
+        // Настраиваем поиск только IPv4 адресов
+        hints.ai_family = AF_INET;        // Только IPv4
+        hints.ai_socktype = SOCK_STREAM;  // TCP
+        hints.ai_protocol = IPPROTO_TCP;  // TCP протокол
+        hints.ai_flags = AI_CANONNAME;    // Получаем каноническое имя
+
+        std::cout << "[DNS] Calling getaddrinfo for " << domain << std::endl;
+
+        int status = getaddrinfo(domain.c_str(), nullptr, &hints, &addrs);
+        if (status != 0) {
+            char msgbuf[256];
+            sprintf_s(msgbuf, "Failed to resolve domain. Error code: %d, WSAError: %d", 
+                     status, WSAGetLastError());
+            result.error = msgbuf;
+            std::cerr << "[DNS] " << result.error << std::endl;
+            WSACleanup();
+            return result;
+        }
+
+        // Перебираем все найденные адреса
+        for (struct addrinfo* addr = addrs; addr != nullptr; addr = addr->ai_next) {
+            char ipstr[INET_ADDRSTRLEN];
+            void* ptr = &((struct sockaddr_in*)addr->ai_addr)->sin_addr;
+            
+            // Преобразуем IP в строку
+            if (inet_ntop(AF_INET, ptr, ipstr, sizeof(ipstr))) {
+                std::string ip = ipstr;
+                std::cout << "[DNS] Found IP: " << ip << std::endl;
+                
+                // Проверяем, не добавляли ли мы уже этот IP
+                if (std::find(result.ipAddresses.begin(), result.ipAddresses.end(), ip) 
+                    == result.ipAddresses.end()) {
+                    result.ipAddresses.push_back(ip);
+                }
+            }
+            
+            // Выводим каноническое имя, если есть
+            if (addr->ai_canonname) {
+                std::cout << "[DNS] Canonical name: " << addr->ai_canonname << std::endl;
+            }
+        }
+
+        freeaddrinfo(addrs);
+        
+        if (result.ipAddresses.empty()) {
+            result.error = "No IPv4 addresses found";
+            result.success = false;
+            std::cerr << "[DNS] " << result.error << std::endl;
+        } else {
+            result.success = true;
+            std::cout << "[DNS] Successfully resolved " << result.ipAddresses.size() 
+                     << " unique IPv4 addresses" << std::endl;
+        }
+    }
+    catch (const std::exception& e) {
+        result.error = "Exception during DNS resolution: " + std::string(e.what());
+        result.success = false;
+        std::cerr << "[DNS] " << result.error << std::endl;
+    }
+
+    WSACleanup();
+    return result;
+}
 
 void WfpFilterManager::RemoveAllRules() {
     if (!engineHandle) return;
@@ -131,20 +218,20 @@ bool WfpFilterManager::AddRule(const Rule& rule, bool isChildRule = false) {
         return false;
     }
 
-    // Проверяем, включено ли правило
     if (!rule.enabled && !isChildRule) {
         std::cout << "[WFP] Skipping disabled rule: " << rule.name << std::endl;
-        return true;  // Возвращаем true, так как это не ошибка
+        return true;
     }
 
     std::cout << "\n[WFP] Adding new rule:" << std::endl
+        << "Name: " << rule.name << std::endl
         << "Protocol: " << ProtocolToString(rule.protocol) << std::endl
         << "Direction: " << (rule.direction == RuleDirection::Inbound ? "Inbound" : "Outbound") << std::endl
         << "Action: " << (rule.action == RuleAction::BLOCK ? "Block" : "Allow") << std::endl
-        << "Source IP: " << rule.sourceIp << std::endl
-        << "Dest IP: " << rule.destIp << std::endl
-        << "Source Port: " << rule.sourcePort << std::endl
-        << "Dest Port: " << rule.destPort << std::endl
+        << "Source IP/Domain: " << rule.sourceIp << std::endl
+        << "Dest IP/Domain: " << rule.destIp << std::endl
+        << "Source Port: " << (rule.sourcePortStr.empty() ? std::to_string(rule.sourcePort) : rule.sourcePortStr) << std::endl
+        << "Dest Port: " << (rule.destPortStr.empty() ? std::to_string(rule.destPort) : rule.destPortStr) << std::endl
         << "App Path: " << rule.appPath << std::endl;
 
     // Специальная обработка для правил приложений
@@ -155,18 +242,104 @@ bool WfpFilterManager::AddRule(const Rule& rule, bool isChildRule = false) {
             return false;
         }
 
-        // Массив слоев для фильтрации приложений
         const GUID* layers[] = {
-            &FWPM_LAYER_ALE_AUTH_CONNECT_V4,      // Исходящие IPv4
-            &FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,  // Входящие IPv4
-            &FWPM_LAYER_ALE_AUTH_CONNECT_V6,      // Исходящие IPv6
-            &FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6   // Входящие IPv6
+            &FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+            &FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+            &FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+            &FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6
         };
 
-        bool success = true;
         for (const GUID* layerKey : layers) {
             FWPM_FILTER0 filter = { 0 };
             FWPM_FILTER_CONDITION0 conditions[2] = { 0 };
+
+            GUID filterKey;
+            if (CoCreateGuid(&filterKey) == S_OK) {
+                filter.filterKey = filterKey;
+            }
+
+            filter.layerKey = *layerKey;
+            filter.displayData.name = const_cast<wchar_t*>(L"AppRule");
+            filter.displayData.description = const_cast<wchar_t*>(L"Application filter rule");
+            filter.action.type = (rule.action == RuleAction::BLOCK) ? FWP_ACTION_BLOCK : FWP_ACTION_PERMIT;
+            filter.weight.type = FWP_UINT8;
+            filter.weight.uint8 = 15;
+            filter.flags = FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT;
+
+            conditions[0].fieldKey = FWPM_CONDITION_ALE_APP_ID;
+            conditions[0].matchType = FWP_MATCH_EQUAL;
+            conditions[0].conditionValue.type = FWP_BYTE_BLOB_TYPE;
+            conditions[0].conditionValue.byteBlob = new FWP_BYTE_BLOB;
+            conditions[0].conditionValue.byteBlob->size = (UINT32)appIdBlob.size();
+            conditions[0].conditionValue.byteBlob->data = appIdBlob.data();
+
+            filter.numFilterConditions = 1;
+            filter.filterCondition = conditions;
+
+            UINT64 filterId = 0;
+            DWORD result = FwpmFilterAdd0(engineHandle, &filter, NULL, &filterId);
+
+            if (result == ERROR_SUCCESS) {
+                addedFilterIds.push_back(filterId);
+                std::cout << "[WFP] App filter added successfully, id: " << filterId << std::endl;
+            }
+            else {
+                std::cerr << "[WFP] Failed to add app filter, error: " << result << std::endl;
+            }
+
+            delete conditions[0].conditionValue.byteBlob;
+        }
+        return true;
+    }
+
+    // Резолвим IP-адреса из доменов
+    std::vector<std::string> sourceIPs;
+    std::vector<std::string> destIPs;
+
+    if (!rule.sourceIp.empty() && rule.sourceIp != "0.0.0.0") {
+        IN_ADDR addr = { 0 };
+        if (InetPtonA(AF_INET, rule.sourceIp.c_str(), &addr) == 1) {
+            sourceIPs.push_back(rule.sourceIp);
+        }
+        else {
+            auto resolved = ResolveDomain(rule.sourceIp);
+            if (resolved.success) {
+                sourceIPs = resolved.ipAddresses;
+                std::cout << "[WFP] Resolved source domain " << rule.sourceIp
+                    << " to " << resolved.ipAddresses.size() << " IPs" << std::endl;
+            }
+            else {
+                std::cerr << "[WFP] Failed to resolve source domain: " << resolved.error << std::endl;
+                return false;
+            }
+        }
+    }
+
+    if (!rule.destIp.empty() && rule.destIp != "0.0.0.0") {
+        IN_ADDR addr = { 0 };
+        if (InetPtonA(AF_INET, rule.destIp.c_str(), &addr) == 1) {
+            destIPs.push_back(rule.destIp);
+        }
+        else {
+            auto resolved = ResolveDomain(rule.destIp);
+            if (resolved.success) {
+                destIPs = resolved.ipAddresses;
+                std::cout << "[WFP] Resolved destination domain " << rule.destIp
+                    << " to " << resolved.ipAddresses.size() << " IPs" << std::endl;
+            }
+            else {
+                std::cerr << "[WFP] Failed to resolve domain: " << resolved.error << std::endl;
+                return false;
+            }
+        }
+    }
+
+    // Создаем отдельное правило для каждого IP-адреса
+    bool success = true;
+    if (!destIPs.empty()) {
+        for (const auto& destIP : destIPs) {
+            FWPM_FILTER0 filter = { 0 };
+            FWPM_FILTER_CONDITION0 conditions[3] = { 0 }; // Уменьшили максимальное количество условий
             UINT32 condCount = 0;
 
             // Создаем уникальный GUID для фильтра
@@ -176,25 +349,72 @@ bool WfpFilterManager::AddRule(const Rule& rule, bool isChildRule = false) {
             }
 
             // Базовые параметры фильтра
-            filter.layerKey = *layerKey;
-            filter.displayData.name = const_cast<wchar_t*>(L"AppBlockRule");
-            filter.displayData.description = const_cast<wchar_t*>(L"Block network access for specific application");
-            filter.action.type = (rule.action == RuleAction::BLOCK) ? FWP_ACTION_BLOCK : FWP_ACTION_PERMIT;
-            filter.weight.type = FWP_UINT8;
-            filter.weight.uint8 = 0xF;  // Максимальный приоритет
+            filter.displayData.name = const_cast<wchar_t*>(L"DomainRule");
+            filter.displayData.description = const_cast<wchar_t*>(L"Domain filter rule");
             filter.flags = FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT;
+            filter.weight.type = FWP_UINT8;
+            filter.weight.uint8 = 15;
 
-            // Условие для идентификации приложения
-            conditions[condCount].fieldKey = FWPM_CONDITION_ALE_APP_ID;
-            conditions[condCount].matchType = FWP_MATCH_EQUAL;
-            conditions[condCount].conditionValue.type = FWP_BYTE_BLOB_TYPE;
-            conditions[condCount].conditionValue.byteBlob = new FWP_BYTE_BLOB;
-            conditions[condCount].conditionValue.byteBlob->size = (UINT32)appIdBlob.size();
-            conditions[condCount].conditionValue.byteBlob->data = appIdBlob.data();
-            condCount++;
+            // Настраиваем слой
+            filter.layerKey = (rule.direction == RuleDirection::Inbound)
+                ? FWPM_LAYER_INBOUND_TRANSPORT_V4
+                : FWPM_LAYER_OUTBOUND_TRANSPORT_V4;
 
+            // Добавляем условие протокола
+            if (rule.protocol != Protocol::ANY) {
+                conditions[condCount].fieldKey = FWPM_CONDITION_IP_PROTOCOL;
+                conditions[condCount].matchType = FWP_MATCH_EQUAL;
+                conditions[condCount].conditionValue.type = FWP_UINT8;
+                conditions[condCount].conditionValue.uint8 = ProtocolToNumber(rule.protocol);
+                condCount++;
+            }
+
+            // Добавляем условие IP-адреса
+            IN_ADDR addr = { 0 };
+            if (InetPtonA(AF_INET, destIP.c_str(), &addr) == 1) {
+                conditions[condCount].fieldKey = (rule.direction == RuleDirection::Inbound)
+                    ? FWPM_CONDITION_IP_LOCAL_ADDRESS
+                    : FWPM_CONDITION_IP_REMOTE_ADDRESS;
+                conditions[condCount].matchType = FWP_MATCH_EQUAL;
+                conditions[condCount].conditionValue.type = FWP_UINT32;
+                conditions[condCount].conditionValue.uint32 = addr.S_un.S_addr;
+                condCount++;
+            }
+
+            // Добавляем условие порта, если указан
+            if (!rule.destPortStr.empty()) {
+                size_t rangePos = rule.destPortStr.find('-');
+                if (rangePos != std::string::npos) {
+                    UINT16 startPort = static_cast<UINT16>(std::stoi(rule.destPortStr.substr(0, rangePos)));
+                    UINT16 endPort = static_cast<UINT16>(std::stoi(rule.destPortStr.substr(rangePos + 1)));
+
+                    conditions[condCount].fieldKey = (rule.direction == RuleDirection::Inbound)
+                        ? FWPM_CONDITION_IP_LOCAL_PORT
+                        : FWPM_CONDITION_IP_REMOTE_PORT;
+                    conditions[condCount].matchType = FWP_MATCH_RANGE;
+                    conditions[condCount].conditionValue.type = FWP_RANGE_TYPE;
+                    conditions[condCount].conditionValue.rangeValue = new FWP_RANGE0;
+                    conditions[condCount].conditionValue.rangeValue->valueLow.type = FWP_UINT16;
+                    conditions[condCount].conditionValue.rangeValue->valueLow.uint16 = startPort;
+                    conditions[condCount].conditionValue.rangeValue->valueHigh.type = FWP_UINT16;
+                    conditions[condCount].conditionValue.rangeValue->valueHigh.uint16 = endPort;
+                    condCount++;
+                }
+            }
+            else if (rule.destPort != 0) {
+                conditions[condCount].fieldKey = (rule.direction == RuleDirection::Inbound)
+                    ? FWPM_CONDITION_IP_LOCAL_PORT
+                    : FWPM_CONDITION_IP_REMOTE_PORT;
+                conditions[condCount].matchType = FWP_MATCH_EQUAL;
+                conditions[condCount].conditionValue.type = FWP_UINT16;
+                conditions[condCount].conditionValue.uint16 = static_cast<UINT16>(rule.destPort);
+                condCount++;
+            }
+
+            // Устанавливаем условия и действие
             filter.numFilterConditions = condCount;
             filter.filterCondition = conditions;
+            filter.action.type = (rule.action == RuleAction::BLOCK) ? FWP_ACTION_BLOCK : FWP_ACTION_PERMIT;
             filter.providerKey = NULL;
 
             // Добавляем фильтр
@@ -203,190 +423,66 @@ bool WfpFilterManager::AddRule(const Rule& rule, bool isChildRule = false) {
 
             if (result == ERROR_SUCCESS) {
                 addedFilterIds.push_back(filterId);
-                std::cout << "[WFP] App filter added successfully for layer "
-                    << (layerKey == &FWPM_LAYER_ALE_AUTH_CONNECT_V4 ? "CONNECT_V4" :
-                        layerKey == &FWPM_LAYER_ALE_AUTH_CONNECT_V6 ? "CONNECT_V6" :
-                        layerKey == &FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4 ? "ACCEPT_V4" :
-                        "ACCEPT_V6")
-                    << ", id: " << filterId << std::endl;
-
-                // Проверяем статус фильтра
-                FWPM_FILTER0* addedFilter = nullptr;
-                if (FwpmFilterGetById0(engineHandle, filterId, &addedFilter) == ERROR_SUCCESS) {
-                    std::cout << "[WFP] Filter verified, status: active" << std::endl;
-                    FwpmFreeMemory((void**)&addedFilter);
-                }
+                std::cout << "[WFP] Filter added successfully for IP " << destIP << ", id: " << filterId << std::endl;
             }
             else {
-                std::cerr << "[WFP] Failed to add app filter, error code: " << result << std::endl;
+                std::cerr << "[WFP] Failed to add filter for IP " << destIP << ", error: " << result << std::endl;
                 success = false;
             }
 
-            delete conditions[0].conditionValue.byteBlob;
+            // Очищаем память для диапазона портов
+            for (UINT32 i = 0; i < condCount; i++) {
+                if (conditions[i].conditionValue.type == FWP_RANGE_TYPE) {
+                    delete conditions[i].conditionValue.rangeValue;
+                }
+            }
         }
-
-        return success;
     }
     else {
-        // Если указан порт и протокол ANY, создаем правила для TCP и UDP
-        if ((rule.sourcePort != 0 || rule.destPort != 0) && rule.protocol == Protocol::ANY && !isChildRule) {
-            std::cout << "[WFP] Protocol is ANY and port is specified, creating TCP and UDP rules..." << std::endl;
-
-            // Создаем правило для TCP
-            Rule tcpRule = rule;
-            tcpRule.protocol = Protocol::TCP;
-            std::cout << "[WFP] Creating TCP rule for port "
-                << (rule.destPort != 0 ? rule.destPort : rule.sourcePort) << std::endl;
-            if (!AddRule(tcpRule, true)) {
-                std::cerr << "[WFP] Failed to add TCP rule" << std::endl;
-                return false;
-            }
-
-            // Создаем правило для UDP
-            Rule udpRule = rule;
-            udpRule.protocol = Protocol::UDP;
-            std::cout << "[WFP] Creating UDP rule for port "
-                << (rule.destPort != 0 ? rule.destPort : rule.sourcePort) << std::endl;
-            if (!AddRule(udpRule, true)) {
-                std::cerr << "[WFP] Failed to add UDP rule" << std::endl;
-                return false;
-            }
-
-            std::cout << "[WFP] Successfully created both TCP and UDP rules" << std::endl;
-            return true;
-        }
-
+        // Если нет IP-адресов, создаем одно правило
         FWPM_FILTER0 filter = { 0 };
-        FWPM_FILTER_CONDITION0 conditions[6] = { 0 };
+        FWPM_FILTER_CONDITION0 conditions[2] = { 0 };
         UINT32 condCount = 0;
 
-        // Создаем уникальный GUID для фильтра
         GUID filterKey;
         if (CoCreateGuid(&filterKey) == S_OK) {
             filter.filterKey = filterKey;
         }
 
-        // Базовые параметры фильтра
-        filter.displayData.name = const_cast<wchar_t*>(L"PortRule");
-        filter.displayData.description = const_cast<wchar_t*>(L"Custom port filter rule");
+        filter.displayData.name = const_cast<wchar_t*>(L"GeneralRule");
+        filter.displayData.description = const_cast<wchar_t*>(L"General filter rule");
         filter.flags = FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT;
+        filter.layerKey = (rule.direction == RuleDirection::Inbound)
+            ? FWPM_LAYER_INBOUND_TRANSPORT_V4
+            : FWPM_LAYER_OUTBOUND_TRANSPORT_V4;
         filter.weight.type = FWP_UINT8;
         filter.weight.uint8 = 15;
 
-        // Выбираем правильный слой для TCP/UDP/ICMP
-        if (rule.protocol == Protocol::ICMP) {
-            filter.layerKey = (rule.direction == RuleDirection::Inbound)
-                ? FWPM_LAYER_INBOUND_TRANSPORT_V4
-                : FWPM_LAYER_OUTBOUND_TRANSPORT_V4;
-
-            // Условие протокола для ICMP
-            conditions[condCount].fieldKey = FWPM_CONDITION_IP_PROTOCOL;
-            conditions[condCount].matchType = FWP_MATCH_EQUAL;
-            conditions[condCount].conditionValue.type = FWP_UINT8;
-            conditions[condCount].conditionValue.uint8 = IPPROTO_ICMP;
-            condCount++;
-        }
-        else if (rule.protocol == Protocol::TCP || rule.protocol == Protocol::UDP) {
-            // Для TCP/UDP используем транспортный слой
-            filter.layerKey = (rule.direction == RuleDirection::Inbound)
-                ? FWPM_LAYER_INBOUND_TRANSPORT_V4
-                : FWPM_LAYER_OUTBOUND_TRANSPORT_V4;
-
-            // Добавляем условие протокола
+        if (rule.protocol != Protocol::ANY) {
             conditions[condCount].fieldKey = FWPM_CONDITION_IP_PROTOCOL;
             conditions[condCount].matchType = FWP_MATCH_EQUAL;
             conditions[condCount].conditionValue.type = FWP_UINT8;
             conditions[condCount].conditionValue.uint8 = ProtocolToNumber(rule.protocol);
             condCount++;
-            std::cout << "[WFP] Adding protocol condition: " << ProtocolToString(rule.protocol) << std::endl;
-
-            // Добавляем порты только для TCP/UDP
-            if (rule.sourcePort != 0) {
-                conditions[condCount].fieldKey = (rule.direction == RuleDirection::Inbound)
-                    ? FWPM_CONDITION_IP_REMOTE_PORT
-                    : FWPM_CONDITION_IP_LOCAL_PORT;
-                conditions[condCount].matchType = FWP_MATCH_EQUAL;
-                conditions[condCount].conditionValue.type = FWP_UINT16;
-                conditions[condCount].conditionValue.uint16 = static_cast<UINT16>(rule.sourcePort);
-                condCount++;
-                std::cout << "[WFP] Adding source port condition: " << rule.sourcePort << std::endl;
-            }
-
-            if (rule.destPort != 0) {
-                conditions[condCount].fieldKey = (rule.direction == RuleDirection::Inbound)
-                    ? FWPM_CONDITION_IP_LOCAL_PORT
-                    : FWPM_CONDITION_IP_REMOTE_PORT;
-                conditions[condCount].matchType = FWP_MATCH_EQUAL;
-                conditions[condCount].conditionValue.type = FWP_UINT16;
-                conditions[condCount].conditionValue.uint16 = static_cast<UINT16>(rule.destPort);
-                condCount++;
-                std::cout << "[WFP] Adding destination port condition: " << rule.destPort << std::endl;
-            }
         }
 
-        // Добавляем условия IP-адресов
-        if (!rule.sourceIp.empty() && rule.sourceIp != "0.0.0.0") {
-            IN_ADDR addr = { 0 };
-            if (InetPtonA(AF_INET, rule.sourceIp.c_str(), &addr) == 1) {
-                conditions[condCount].fieldKey = (rule.direction == RuleDirection::Inbound)
-                    ? FWPM_CONDITION_IP_REMOTE_ADDRESS
-                    : FWPM_CONDITION_IP_LOCAL_ADDRESS;
-                conditions[condCount].matchType = FWP_MATCH_EQUAL;
-                conditions[condCount].conditionValue.type = FWP_UINT32;
-                conditions[condCount].conditionValue.uint32 = addr.S_un.S_addr;
-                condCount++;
-                std::cout << "[WFP] Adding source IP condition: " << rule.sourceIp << std::endl;
-            }
-        }
-
-        if (!rule.destIp.empty() && rule.destIp != "0.0.0.0") {
-            IN_ADDR addr = { 0 };
-            if (InetPtonA(AF_INET, rule.destIp.c_str(), &addr) == 1) {
-                conditions[condCount].fieldKey = (rule.direction == RuleDirection::Inbound)
-                    ? FWPM_CONDITION_IP_LOCAL_ADDRESS
-                    : FWPM_CONDITION_IP_REMOTE_ADDRESS;
-                conditions[condCount].matchType = FWP_MATCH_EQUAL;
-                conditions[condCount].conditionValue.type = FWP_UINT32;
-                conditions[condCount].conditionValue.uint32 = addr.S_un.S_addr;
-                condCount++;
-                std::cout << "[WFP] Adding destination IP condition: " << rule.destIp << std::endl;
-            }
-        }
-
-        // Устанавливаем окончательные параметры фильтра
         filter.numFilterConditions = condCount;
         filter.filterCondition = conditions;
         filter.action.type = (rule.action == RuleAction::BLOCK) ? FWP_ACTION_BLOCK : FWP_ACTION_PERMIT;
-        filter.providerKey = NULL;
 
-        // Проверяем, что у нас есть хотя бы одно условие
-        if (condCount == 0) {
-            std::cerr << "[WFP] Warning: No conditions specified for the filter" << std::endl;
-            return false;
-        }
-
-        // Добавляем фильтр
         UINT64 filterId = 0;
         DWORD result = FwpmFilterAdd0(engineHandle, &filter, NULL, &filterId);
 
         if (result == ERROR_SUCCESS) {
             addedFilterIds.push_back(filterId);
-            std::cout << "[WFP] Filter added successfully, id: " << filterId << std::endl;
-
-            // Проверяем статус фильтра
-            FWPM_FILTER0* addedFilter = nullptr;
-            if (FwpmFilterGetById0(engineHandle, filterId, &addedFilter) == ERROR_SUCCESS) {
-                std::cout << "[WFP] Filter verified, status: active" << std::endl;
-                FwpmFreeMemory((void**)&addedFilter);
-                return true;
-            }
+            std::cout << "[WFP] General filter added successfully, id: " << filterId << std::endl;
         }
         else {
-            std::cerr << "[WFP] Failed to add filter, error code: " << result << std::endl;
+            std::cerr << "[WFP] Failed to add general filter, error: " << result << std::endl;
+            success = false;
         }
-
-        return false;
     }
+    return true;
 }
 
 bool WfpFilterManager::ApplyRules(const std::vector<Rule>& rules) {

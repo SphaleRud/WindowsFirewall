@@ -20,9 +20,21 @@ enum class ProtocolFilter
     UDP
 };
 
+enum class FilterMode {
+    BLACKLIST,  // Блокировать выбранные правила
+    WHITELIST   // Разрешить только выбранные правила
+};
+
 struct AppSettings
 {
     ProtocolFilter protocolFilter = ProtocolFilter::All;
+    FilterMode filterMode;          // новое поле
+
+    AppSettings() :
+        protocolFilter(ProtocolFilter::All),
+        filterMode(FilterMode::BLACKLIST)
+    {
+    }
 };
 
 // Структуры сетевого уровня

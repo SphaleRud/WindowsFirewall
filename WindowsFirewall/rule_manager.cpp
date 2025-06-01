@@ -79,6 +79,8 @@ bool RuleManager::SaveRulesToFile(const std::wstring& path) const {
             {"destIp", r.destIp},
             {"sourcePort", r.sourcePort},
             {"destPort", r.destPort},
+            {"sourcePortStr", r.sourcePortStr},
+            {"destPortStr", r.destPortStr},
             {"appPath", r.appPath},
             {"action", ActionToString(r.action)},
             {"enabled", r.enabled},
@@ -107,6 +109,8 @@ bool RuleManager::LoadRulesFromFile(const std::wstring& path) {
         r.destIp = j.value("destIp", "");
         r.sourcePort = j.value("sourcePort", 0);
         r.destPort = j.value("destPort", 0);
+        r.sourcePortStr = j.value("sourcePortStr", "");
+        r.destPortStr = j.value("destPortStr", "");
         r.appPath = j.value("appPath", "");
         r.action = ActionFromString(j.value("action", "ALLOW"));
         r.enabled = j.value("enabled", true);
@@ -273,8 +277,22 @@ void FillRulesList(HWND hList) {
         values[4] = Utf8ToWide(rule.sourceIp);
         values[5] = Utf8ToWide(rule.destIp);
         values[6] = Utf8ToWide(ProtocolToString(rule.protocol));
-        values[7] = rule.sourcePort == 0 ? L"Любой" : std::to_wstring(rule.sourcePort);
-        values[8] = rule.destPort == 0 ? L"Любой" : std::to_wstring(rule.destPort);
+
+        // Для исходного порта
+        if (!rule.sourcePortStr.empty()) {
+            values[7] = Utf8ToWide(rule.sourcePortStr);
+        }
+        else {
+            values[7] = rule.sourcePort == 0 ? L"Любой" : std::to_wstring(rule.sourcePort);
+        }
+
+        // Для порта назначения
+        if (!rule.destPortStr.empty()) {
+            values[8] = Utf8ToWide(rule.destPortStr);
+        }
+        else {
+            values[8] = rule.destPort == 0 ? L"Любой" : std::to_wstring(rule.destPort);
+        }
 
         LVITEM lvi = { 0 };
         lvi.mask = LVIF_TEXT | LVIF_PARAM;

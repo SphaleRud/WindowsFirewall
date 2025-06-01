@@ -4,6 +4,8 @@
 #include <CommCtrl.h>
 #include "string_utils.h" 
 #include <vector>
+#include <sstream>
+#include <string>
 #include "validator.h"
 #include <windowsx.h>
 #include <shlwapi.h>
@@ -210,6 +212,70 @@ INT_PTR CALLBACK RuleWizard::DialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
     return FALSE;
 }
 
+// Вспомогательная функция для парсинга строки портов
+std::vector<std::pair<UINT16, UINT16>> ParsePorts(const std::wstring& portStr) {
+    std::vector<std::pair<UINT16, UINT16>> ports;
+
+    size_t start = 0;
+    size_t end = 0;
+
+    while ((end = portStr.find(L',', start)) != std::wstring::npos) {
+        std::wstring part = portStr.substr(start, end - start);
+        start = end + 1;
+
+        // Проверяем на диапазон
+        size_t rangePos = part.find(L'-');
+        if (rangePos != std::wstring::npos) {
+            try {
+                UINT16 rangeStart = static_cast<UINT16>(_wtoi(part.substr(0, rangePos).c_str()));
+                UINT16 rangeEnd = static_cast<UINT16>(_wtoi(part.substr(rangePos + 1).c_str()));
+                if (rangeStart > 0 && rangeEnd <= 65535 && rangeStart <= rangeEnd) {
+                    ports.push_back(std::make_pair(rangeStart, rangeEnd));
+                }
+            }
+            catch (...) {
+                continue;
+            }
+        }
+        else {
+            try {
+                UINT16 port = static_cast<UINT16>(_wtoi(part.c_str()));
+                if (port > 0 && port <= 65535) {
+                    ports.push_back(std::make_pair(port, port));
+                }
+            }
+            catch (...) {
+                continue;
+            }
+        }
+    }
+
+    // Обрабатываем последнюю часть
+    std::wstring part = portStr.substr(start);
+    size_t rangePos = part.find(L'-');
+    if (rangePos != std::wstring::npos) {
+        try {
+            UINT16 rangeStart = static_cast<UINT16>(_wtoi(part.substr(0, rangePos).c_str()));
+            UINT16 rangeEnd = static_cast<UINT16>(_wtoi(part.substr(rangePos + 1).c_str()));
+            if (rangeStart > 0 && rangeEnd <= 65535 && rangeStart <= rangeEnd) {
+                ports.push_back(std::make_pair(rangeStart, rangeEnd));
+            }
+        }
+        catch (...) {}
+    }
+    else {
+        try {
+            UINT16 port = static_cast<UINT16>(_wtoi(part.c_str()));
+            if (port > 0 && port <= 65535) {
+                ports.push_back(std::make_pair(port, port));
+            }
+        }
+        catch (...) {}
+    }
+
+    return ports;
+}
+
 bool RuleWizard::ValidateCurrentPage() {
     wchar_t buffer[MAX_PATH];
     switch (m_currentPage) {
@@ -231,13 +297,76 @@ bool RuleWizard::ValidateCurrentPage() {
             return false;
         }
         return true;
-    case PAGE_PARAMS_PORT:
+    case PAGE_PARAMS_PORT: {
         GetDlgItemText(m_hwndCurrent, IDC_PORT_EDIT, buffer, MAX_PATH);
-        if (buffer[0] == L'\0' || _wtoi(buffer) <= 0 || _wtoi(buffer) > 65535) {
-            MessageBox(m_hwndCurrent, L"Введите корректный номер порта (1-65535)", L"Ошибка", MB_OK | MB_ICONWARNING);
+        std::wstring portStr = buffer;
+
+        // Проверка формата порта
+        if (portStr.empty()) {
+            MessageBox(m_hwndCurrent, L"Введите значение порта", L"Ошибка", MB_OK | MB_ICONWARNING);
             return false;
         }
+
+        // Проверка диапазона
+        if (portStr.find(L'-') != std::wstring::npos) {
+            size_t pos = portStr.find(L'-');
+            std::wstring startStr = portStr.substr(0, pos);
+            std::wstring endStr = portStr.substr(pos + 1);
+
+            try {
+                int start = std::stoi(startStr);
+                int end = std::stoi(endStr);
+
+                if (start <= 0 || start > 65535 || end <= 0 || end > 65535 || start > end) {
+                    MessageBox(m_hwndCurrent, L"Некорректный диапазон портов (1-65535)",
+                        L"Ошибка", MB_OK | MB_ICONWARNING);
+                    return false;
+                }
+            }
+            catch (...) {
+                MessageBox(m_hwndCurrent, L"Некорректный формат диапазона портов",
+                    L"Ошибка", MB_OK | MB_ICONWARNING);
+                return false;
+            }
+        }
+        // Проверка списка
+        else if (portStr.find(L',') != std::wstring::npos) {
+            std::wstringstream ss(portStr);
+            std::wstring port;
+            while (std::getline(ss, port, L',')) {
+                try {
+                    int p = std::stoi(port);
+                    if (p <= 0 || p > 65535) {
+                        MessageBox(m_hwndCurrent, L"Порт должен быть в диапазоне 1-65535",
+                            L"Ошибка", MB_OK | MB_ICONWARNING);
+                        return false;
+                    }
+                }
+                catch (...) {
+                    MessageBox(m_hwndCurrent, L"Некорректный формат порта в списке",
+                        L"Ошибка", MB_OK | MB_ICONWARNING);
+                    return false;
+                }
+            }
+        }
+        // Проверка одиночного порта
+        else {
+            try {
+                int port = std::stoi(portStr);
+                if (port <= 0 || port > 65535) {
+                    MessageBox(m_hwndCurrent, L"Порт должен быть в диапазоне 1-65535",
+                        L"Ошибка", MB_OK | MB_ICONWARNING);
+                    return false;
+                }
+            }
+            catch (...) {
+                MessageBox(m_hwndCurrent, L"Некорректный формат порта",
+                    L"Ошибка", MB_OK | MB_ICONWARNING);
+                return false;
+            }
+        }
         return true;
+    }
     case PAGE_NAME:
         GetDlgItemText(m_hwndCurrent, IDC_RULE_NAME_EDIT, buffer, MAX_PATH);
         if (buffer[0] == L'\0') {
@@ -329,10 +458,31 @@ bool RuleWizard::ApplyPageData() {
         GetDlgItemText(m_hwndCurrent, IDC_APP_PATH_EDIT, buffer, MAX_PATH);
         m_ruleDraft.appPath = WideToUtf8(buffer);
         break;
-    case PAGE_PARAMS_PORT:
+    case PAGE_PARAMS_PORT: {
         GetDlgItemText(m_hwndCurrent, IDC_PORT_EDIT, buffer, MAX_PATH);
-        m_ruleDraft.destPort = _wtoi(buffer);
+        // Сохраняем строку с портами
+        m_ruleDraft.destPortStr = WideToUtf8(buffer);
+
+        // Для обратной совместимости сохраняем первый порт
+        if (buffer[0] != L'\0') {
+            // Если это диапазон, берем первое число
+            std::wstring portStr = buffer;
+            size_t pos = portStr.find(L'-');
+            if (pos != std::wstring::npos) {
+                portStr = portStr.substr(0, pos);
+            }
+            // Если это список, берем первое число
+            pos = portStr.find(L',');
+            if (pos != std::wstring::npos) {
+                portStr = portStr.substr(0, pos);
+            }
+            m_ruleDraft.destPort = _wtoi(portStr.c_str());
+        }
+        else {
+            m_ruleDraft.destPort = 0;
+        }
         break;
+    }
     case PAGE_PARAMS_PROTO: {
         // Протокол
         int protoIdx = ComboBox_GetCurSel(GetDlgItem(m_hwndCurrent, IDC_PROTOCOL_COMBO));
@@ -484,12 +634,18 @@ INT_PTR CALLBACK RuleWizard::PageDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             SetDlgItemText(hwnd, IDC_ADV_APP_PATH_EDIT, Utf8ToWide(self->m_ruleDraft.appPath).c_str());
         }
 
+
+        // Восстанавливаем значения портов
         HWND portEdit = GetDlgItem(hwnd, IDC_PORT_EDIT);
         if (portEdit) {
-            if (self->m_ruleDraft.destPort != 0)
+            // Если есть строка с портами, используем её
+            if (!self->m_ruleDraft.destPortStr.empty()) {
+                SetDlgItemText(hwnd, IDC_PORT_EDIT, Utf8ToWide(self->m_ruleDraft.destPortStr).c_str());
+            }
+            // Иначе используем обычный порт
+            else if (self->m_ruleDraft.destPort != 0) {
                 SetDlgItemText(hwnd, IDC_PORT_EDIT, std::to_wstring(self->m_ruleDraft.destPort).c_str());
-            else
-                SetDlgItemText(hwnd, IDC_PORT_EDIT, L"");
+            }
         }
 
         // --- Адреса и порты (PAGE_PARAMS_PROTO, PAGE_PARAMS_ADVANCED) ---

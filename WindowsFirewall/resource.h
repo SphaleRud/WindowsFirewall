@@ -129,6 +129,8 @@
 #define IDC_RADIO_UDP					6103
 #define IDC_RADIO_TCP_UDP				6104
 #define IDC_RADIO_ALL					6105
+#define IDC_RADIO_BLACKLIST				6106
+#define IDC_RADIO_WHITELIST				6107
 #define IDC_STATIC                      -1
 
 // Next default values for new objects

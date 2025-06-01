@@ -24,6 +24,8 @@ public:
         , destIp(other.destIp)
         , sourcePort(other.sourcePort)
         , destPort(other.destPort)
+        , sourcePortStr(other.sourcePortStr)
+        , destPortStr(other.destPortStr)     
         , appPath(other.appPath)
         , action(other.action)
         , enabled(other.enabled)
@@ -43,6 +45,8 @@ public:
             destIp = other.destIp;
             sourcePort = other.sourcePort;
             destPort = other.destPort;
+            sourcePortStr = other.sourcePortStr; 
+            destPortStr = other.destPortStr;     
             appPath = other.appPath;
             action = other.action;
             enabled = other.enabled;
@@ -61,6 +65,8 @@ public:
     std::string destIp;
     int sourcePort;
     int destPort;
+    std::string sourcePortStr; 
+    std::string destPortStr;
     std::string appPath;
     RuleAction action;
     bool enabled;

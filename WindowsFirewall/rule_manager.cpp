@@ -294,7 +294,6 @@ void FillRulesList(HWND hList) {
         }
         itemIndex++;
     }
-    ListView_SortItems(hList, NULL, 0);
 }
 
 // Удаление выбранных правил по lParam (id)
@@ -339,11 +338,16 @@ INT_PTR CALLBACK RuleManager::RulesDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wP
 
         hList = GetDlgItem(hwndDlg, IDC_RULES_LIST);
 
+
         // Устанавливаем стиль выделения всей строки и разрешаем множественный выбор
         LONG_PTR style = GetWindowLongPtr(hList, GWL_STYLE);
         style |= LVS_FULLROWSELECT;
         style &= ~LVS_SINGLESEL; // разрешить множественный выбор
+        style |= LVS_REPORT | LVS_SHOWSELALWAYS;
+        style &= ~(LVS_SORTASCENDING | LVS_SORTDESCENDING);
         SetWindowLongPtr(hList, GWL_STYLE, style);
+
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
 
         // Включаем расширенный стиль выделения всей строки
         SendMessage(hList, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_FULLROWSELECT, LVS_EX_FULLROWSELECT);

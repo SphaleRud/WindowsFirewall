@@ -245,6 +245,55 @@ bool RuleWizard::ValidateCurrentPage() {
             return false;
         }
         return true;
+    case PAGE_PARAMS_PROTO:
+    case PAGE_PARAMS_ADVANCED: {
+        // Проверка IP адресов
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_IP) != BST_CHECKED) {
+            GetDlgItemText(m_hwndCurrent, IDC_EDIT_LOCAL_IP, buffer, MAX_PATH);
+            if (buffer[0] != L'\0') {
+                std::string ipStr = WideToUtf8(buffer);
+                if (!RuleValidator::ValidateIpAddress(ipStr)) {
+                    MessageBox(m_hwndCurrent, L"Некорректный локальный IP адрес", L"Ошибка", MB_OK | MB_ICONWARNING);
+                    return false;
+                }
+            }
+        }
+
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_IP) != BST_CHECKED) {
+            GetDlgItemText(m_hwndCurrent, IDC_EDIT_REMOTE_IP, buffer, MAX_PATH);
+            if (buffer[0] != L'\0') {
+                std::string ipStr = WideToUtf8(buffer);
+                if (!RuleValidator::ValidateIpAddress(ipStr)) {
+                    MessageBox(m_hwndCurrent, L"Некорректный удаленный IP адрес", L"Ошибка", MB_OK | MB_ICONWARNING);
+                    return false;
+                }
+            }
+        }
+
+        // Проверка портов
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_PORT) != BST_CHECKED) {
+            GetDlgItemText(m_hwndCurrent, IDC_EDIT_LOCAL_PORT, buffer, MAX_PATH);
+            if (buffer[0] != L'\0') {
+                int port = _wtoi(buffer);
+                if (port <= 0 || port > 65535) {
+                    MessageBox(m_hwndCurrent, L"Некорректный локальный порт (1-65535)", L"Ошибка", MB_OK | MB_ICONWARNING);
+                    return false;
+                }
+            }
+        }
+
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_PORT) != BST_CHECKED) {
+            GetDlgItemText(m_hwndCurrent, IDC_EDIT_REMOTE_PORT, buffer, MAX_PATH);
+            if (buffer[0] != L'\0') {
+                int port = _wtoi(buffer);
+                if (port <= 0 || port > 65535) {
+                    MessageBox(m_hwndCurrent, L"Некорректный удаленный порт (1-65535)", L"Ошибка", MB_OK | MB_ICONWARNING);
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
     default:
         return true;
     }
@@ -333,84 +382,48 @@ bool RuleWizard::ApplyPageData() {
         GetDlgItemText(m_hwndCurrent, IDC_PORT_EDIT, buffer, MAX_PATH);
         m_ruleDraft.destPort = _wtoi(buffer);
         break;
-    case PAGE_PARAMS_PROTO: {
-        // Протокол
-        int protoIdx = ComboBox_GetCurSel(GetDlgItem(m_hwndCurrent, IDC_PROTOCOL_COMBO));
-        m_ruleDraft.protocol = protoIdx == CB_ERR ? Protocol::ANY : static_cast<Protocol>(protoIdx);
+    case PAGE_PARAMS_PROTO:
+    case PAGE_PARAMS_ADVANCED: {
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_IP) == BST_CHECKED) {
+            m_ruleDraft.sourceIpType = IpMatchType::ANY;
+            m_ruleDraft.sourceIp = "";
+        }
+        else {
+            GetDlgItemText(m_hwndCurrent, IDC_EDIT_LOCAL_IP, buffer, MAX_PATH);
+            m_ruleDraft.sourceIpType = IpMatchType::SPECIFIC;
+            m_ruleDraft.sourceIp = WideToUtf8(buffer);
+        }
 
-        // Локальный порт
+        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_IP) == BST_CHECKED) {
+            m_ruleDraft.destIpType = IpMatchType::ANY;
+            m_ruleDraft.destIp = "";
+        }
+        else {
+            GetDlgItemText(m_hwndCurrent, IDC_EDIT_REMOTE_IP, buffer, MAX_PATH);
+            m_ruleDraft.destIpType = IpMatchType::SPECIFIC;
+            m_ruleDraft.destIp = WideToUtf8(buffer);
+        }
+
+        // Аналогично для портов
         if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_PORT) == BST_CHECKED) {
+            m_ruleDraft.sourcePortType = PortMatchType::ANY;
             m_ruleDraft.sourcePort = 0;
         }
         else {
             GetDlgItemText(m_hwndCurrent, IDC_EDIT_LOCAL_PORT, buffer, MAX_PATH);
-            m_ruleDraft.sourcePort = wcslen(buffer) ? _wtoi(buffer) : 0;
+            m_ruleDraft.sourcePortType = PortMatchType::SPECIFIC;
+            m_ruleDraft.sourcePort = _wtoi(buffer);
         }
 
-        // Порт назначения
         if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_PORT) == BST_CHECKED) {
+            m_ruleDraft.destPortType = PortMatchType::ANY;
             m_ruleDraft.destPort = 0;
         }
         else {
             GetDlgItemText(m_hwndCurrent, IDC_EDIT_REMOTE_PORT, buffer, MAX_PATH);
-            m_ruleDraft.destPort = wcslen(buffer) ? _wtoi(buffer) : 0;
+            m_ruleDraft.destPortType = PortMatchType::SPECIFIC;
+            m_ruleDraft.destPort = _wtoi(buffer);
         }
-
-        // Локальный IP
-        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_IP) == BST_CHECKED) {
-            m_ruleDraft.sourceIp = "Любые";
-        }
-        else {
-            GetDlgItemText(m_hwndCurrent, IDC_EDIT_LOCAL_IP, buffer, MAX_PATH);
-            m_ruleDraft.sourceIp = WideToUtf8(buffer);
-        }
-
-        // IP назначения
-        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_IP) == BST_CHECKED) {
-            m_ruleDraft.destIp = "Любые";
-        }
-        else {
-            GetDlgItemText(m_hwndCurrent, IDC_EDIT_REMOTE_IP, buffer, MAX_PATH);
-            m_ruleDraft.destIp = WideToUtf8(buffer);
-        }
-        break;
-    }
-    case PAGE_PARAMS_ADVANCED: {
-        // Аналогично PAGE_PARAMS_PROTO, только используйте свои контролы, например, IDC_ADV_PROTO_COMBO, IDC_ADV_SRC_PORT_EDIT и т.д.
-        int protoIdx = ComboBox_GetCurSel(GetDlgItem(m_hwndCurrent, IDC_ADV_PROTO_COMBO));
-        m_ruleDraft.protocol = protoIdx == CB_ERR ? Protocol::ANY : static_cast<Protocol>(protoIdx);
-
-        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_PORT) == BST_CHECKED) {
-            m_ruleDraft.sourcePort = 0;
-        }
-        else {
-            GetDlgItemText(m_hwndCurrent, IDC_ADV_SRC_PORT_EDIT, buffer, MAX_PATH);
-            m_ruleDraft.sourcePort = wcslen(buffer) ? _wtoi(buffer) : 0;
-        }
-        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_PORT) == BST_CHECKED) {
-            m_ruleDraft.destPort = 0;
-        }
-        else {
-            GetDlgItemText(m_hwndCurrent, IDC_ADV_DST_PORT_EDIT, buffer, MAX_PATH);
-            m_ruleDraft.destPort = wcslen(buffer) ? _wtoi(buffer) : 0;
-        }
-        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_LOCAL_IP) == BST_CHECKED) {
-            m_ruleDraft.sourceIp = "0.0.0.0";
-        }
-        else {
-            GetDlgItemText(m_hwndCurrent, IDC_ADV_SRC_IP_EDIT, buffer, MAX_PATH);
-            m_ruleDraft.sourceIp = WideToUtf8(buffer);
-        }
-        if (IsDlgButtonChecked(m_hwndCurrent, IDC_CHECK_ANY_REMOTE_IP) == BST_CHECKED) {
-            m_ruleDraft.destIp = "0.0.0.0";
-        }
-        else {
-            GetDlgItemText(m_hwndCurrent, IDC_ADV_DST_IP_EDIT, buffer, MAX_PATH);
-            m_ruleDraft.destIp = WideToUtf8(buffer);
-        }
-        // Программа
-        GetDlgItemText(m_hwndCurrent, IDC_ADV_APP_PATH_EDIT, buffer, MAX_PATH);
-        m_ruleDraft.appPath = WideToUtf8(buffer);
         break;
     }
     case PAGE_ACTION:

@@ -27,6 +27,9 @@
     <ClCompile Include="..\WindowsFirewall\rule_wizard.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\WindowsFirewall\validator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="wfp_manager.h">

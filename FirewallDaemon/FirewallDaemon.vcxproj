@@ -127,6 +127,7 @@
   <ItemGroup>
     <ClCompile Include="..\WindowsFirewall\rule_manager.cpp" />
     <ClCompile Include="..\WindowsFirewall\rule_wizard.cpp" />
+    <ClCompile Include="..\WindowsFirewall\validator.cpp" />
     <ClCompile Include="FirewallDaemon.cpp" />
     <ClCompile Include="wfp_manager.cpp" />
   </ItemGroup>

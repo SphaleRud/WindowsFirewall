@@ -54,12 +54,14 @@ bool RuleValidator::ValidateIpInput(const std::wstring& input, std::vector<std::
     for (const auto& part : parts) {
         // Проверяем на CIDR нотацию
         if (part.find(L'/') != std::wstring::npos) {
-            // TODO: Реализовать проверку CIDR
             size_t slashPos = part.find(L'/');
-            std::string ipAddr = WideToUtf8(part.substr(0, slashPos).c_str());
+            std::string ipAddr = WideToUtf8(part.substr(0, slashPos));
             // Получаем маску подсети
             int prefixLen = _wtoi(part.substr(slashPos + 1).c_str());
             if (prefixLen < 0 || prefixLen > 32) {
+                return false;
+            }
+            if (!ValidateIpAddress(ipAddr)) {
                 return false;
             }
             ipRanges.push_back({ ipAddr, ipAddr }); // Временно сохраняем как одиночный IP
@@ -69,8 +71,8 @@ bool RuleValidator::ValidateIpInput(const std::wstring& input, std::vector<std::
         // Проверяем на диапазон
         if (part.find(L'-') != std::wstring::npos) {
             size_t dashPos = part.find(L'-');
-            std::string start = WideToUtf8(part.substr(0, dashPos).c_str());
-            std::string end = WideToUtf8(part.substr(dashPos + 1).c_str());
+            std::string start = WideToUtf8(part.substr(0, dashPos));
+            std::string end = WideToUtf8(part.substr(dashPos + 1));
 
             // Добавляем базовую валидацию IP адресов
             if (!ValidateIpAddress(start) || !ValidateIpAddress(end)) {
@@ -80,7 +82,7 @@ bool RuleValidator::ValidateIpInput(const std::wstring& input, std::vector<std::
             ipRanges.push_back({ start, end });
         }
         else {
-            std::string single = WideToUtf8(part.c_str());
+            std::string single = WideToUtf8(part);
             // Проверяем корректность одиночного IP адреса
             if (!ValidateIpAddress(single)) {
                 return false;
@@ -91,7 +93,6 @@ bool RuleValidator::ValidateIpInput(const std::wstring& input, std::vector<std::
     return true;
 }
 
-// Добавим вспомогательную функцию для проверки корректности IP адреса
 bool RuleValidator::ValidateIpAddress(const std::string& ip) {
     std::istringstream iss(ip);
     std::string octet;
@@ -133,14 +134,14 @@ bool RuleValidator::ValidateInputs(HWND hwnd, std::wstring& errorMsg) {
     wchar_t buffer[MAX_PATH];
 
     // Проверка названия
-    GetDlgItemText(hwnd, IDC_EDIT_NAME, buffer, MAX_PATH);
+    GetDlgItemText(hwnd, IDC_RULE_NAME_EDIT, buffer, MAX_PATH);
     if (wcslen(buffer) == 0) {
         errorMsg = L"Введите название правила";
         return false;
     }
 
     // Проверка программы
-    GetDlgItemText(hwnd, IDC_EDIT_PROGRAM, buffer, MAX_PATH);
+    GetDlgItemText(hwnd, IDC_APP_PATH_EDIT, buffer, MAX_PATH);
     if (wcslen(buffer) > 0) {
         if (GetFileAttributes(buffer) == INVALID_FILE_ATTRIBUTES) {
             errorMsg = L"Указанный файл программы не существует";
@@ -152,7 +153,7 @@ bool RuleValidator::ValidateInputs(HWND hwnd, std::wstring& errorMsg) {
     if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_LOCAL_IP) != BST_CHECKED) {
         GetDlgItemText(hwnd, IDC_EDIT_LOCAL_IP, buffer, MAX_PATH);
         std::vector<std::pair<std::string, std::string>> ipRanges;
-        if (!RuleValidator::ValidateIpInput(std::wstring(buffer), ipRanges)) {
+        if (!ValidateIpInput(std::wstring(buffer), ipRanges)) {
             errorMsg = L"Неверный формат локального IP адреса";
             return false;
         }
@@ -161,7 +162,7 @@ bool RuleValidator::ValidateInputs(HWND hwnd, std::wstring& errorMsg) {
     if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_REMOTE_IP) != BST_CHECKED) {
         GetDlgItemText(hwnd, IDC_EDIT_REMOTE_IP, buffer, MAX_PATH);
         std::vector<std::pair<std::string, std::string>> ipRanges;
-        if (!RuleValidator::ValidateIpInput(std::wstring(buffer), ipRanges)) {
+        if (!ValidateIpInput(std::wstring(buffer), ipRanges)) {
             errorMsg = L"Неверный формат удаленного IP адреса";
             return false;
         }
@@ -171,7 +172,7 @@ bool RuleValidator::ValidateInputs(HWND hwnd, std::wstring& errorMsg) {
     if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_LOCAL_PORT) != BST_CHECKED) {
         GetDlgItemText(hwnd, IDC_EDIT_LOCAL_PORT, buffer, MAX_PATH);
         std::vector<std::pair<int, int>> portRanges;
-        if (!RuleValidator::ValidatePortInput(std::wstring(buffer), portRanges)) {
+        if (!ValidatePortInput(std::wstring(buffer), portRanges)) {
             errorMsg = L"Неверный формат локального порта";
             return false;
         }
@@ -180,7 +181,7 @@ bool RuleValidator::ValidateInputs(HWND hwnd, std::wstring& errorMsg) {
     if (IsDlgButtonChecked(hwnd, IDC_CHECK_ANY_REMOTE_PORT) != BST_CHECKED) {
         GetDlgItemText(hwnd, IDC_EDIT_REMOTE_PORT, buffer, MAX_PATH);
         std::vector<std::pair<int, int>> portRanges;
-        if (!RuleValidator::ValidatePortInput(std::wstring(buffer), portRanges)) {
+        if (!ValidatePortInput(std::wstring(buffer), portRanges)) {
             errorMsg = L"Неверный формат удаленного порта";
             return false;
         }

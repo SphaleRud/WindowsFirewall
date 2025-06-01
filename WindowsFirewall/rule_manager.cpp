@@ -59,6 +59,32 @@ std::wstring GetExecutableDir()
     return L".";
 }
 
+static std::string IpMatchTypeToString(IpMatchType type) {
+    switch (type) {
+    case IpMatchType::ANY: return "ANY";
+    case IpMatchType::SPECIFIC: return "SPECIFIC";
+    default: return "ANY";
+    }
+}
+
+static IpMatchType IpMatchTypeFromString(const std::string& str) {
+    if (str == "SPECIFIC") return IpMatchType::SPECIFIC;
+    return IpMatchType::ANY;
+}
+
+static std::string PortMatchTypeToString(PortMatchType type) {
+    switch (type) {
+    case PortMatchType::ANY: return "ANY";
+    case PortMatchType::SPECIFIC: return "SPECIFIC";
+    default: return "ANY";
+    }
+}
+
+static PortMatchType PortMatchTypeFromString(const std::string& str) {
+    if (str == "SPECIFIC") return PortMatchType::SPECIFIC;
+    return PortMatchType::ANY;
+}
+
 std::wstring rulesPath = GetExecutableDir() + L"\\rules.json";
 
 bool RuleManager::SaveRulesToFile(const std::wstring& path) const {
@@ -67,23 +93,50 @@ bool RuleManager::SaveRulesToFile(const std::wstring& path) const {
         OutputDebugStringA("Не удалось создать rules.json!\n");
         return false;
     }
-    OutputDebugStringA("rules.json успешно открыт для записи.\n");
     json arr = json::array();
     for (const auto& r : rules) {
-        arr.push_back({
+        json ruleJson = {
             {"id", r.id},
             {"name", r.name},
             {"description", r.description},
             {"protocol", ProtocolToString(r.protocol)},
-            {"sourceIp", r.sourceIp},
-            {"destIp", r.destIp},
-            {"sourcePort", r.sourcePort},
-            {"destPort", r.destPort},
             {"appPath", r.appPath},
             {"action", ActionToString(r.action)},
             {"enabled", r.enabled},
             {"direction", DirectionToString(r.direction)}
-            });
+        };
+
+        // Сохраняем IP только если тип SPECIFIC
+        if (r.sourceIpType == IpMatchType::SPECIFIC) {
+            ruleJson["sourceIp"] = r.sourceIp;
+        }
+        else {
+            ruleJson["sourceIp"] = "";
+        }
+
+        if (r.destIpType == IpMatchType::SPECIFIC) {
+            ruleJson["destIp"] = r.destIp;
+        }
+        else {
+            ruleJson["destIp"] = "";
+        }
+
+        // Сохраняем порты только если тип SPECIFIC
+        if (r.sourcePortType == PortMatchType::SPECIFIC) {
+            ruleJson["sourcePort"] = r.sourcePort;
+        }
+        else {
+            ruleJson["sourcePort"] = 0;
+        }
+
+        if (r.destPortType == PortMatchType::SPECIFIC) {
+            ruleJson["destPort"] = r.destPort;
+        }
+        else {
+            ruleJson["destPort"] = 0;
+        }
+
+        arr.push_back(ruleJson);
     }
     f << arr.dump(2);
     return true;
@@ -103,14 +156,34 @@ bool RuleManager::LoadRulesFromFile(const std::wstring& path) {
         r.name = j.value("name", "");
         r.description = j.value("description", "");
         r.protocol = ProtocolFromString(j.value("protocol", "ANY"));
+        r.appPath = j.value("appPath", "");
+
+        // Загрузка IP адресов и их типов
         r.sourceIp = j.value("sourceIp", "");
         r.destIp = j.value("destIp", "");
+
+        // Определяем тип на основе значения
+        r.sourceIpType = r.sourceIp.empty() ? IpMatchType::ANY : IpMatchType::SPECIFIC;
+        r.destIpType = r.destIp.empty() ? IpMatchType::ANY : IpMatchType::SPECIFIC;
+
+        // Загрузка портов и их типов
         r.sourcePort = j.value("sourcePort", 0);
         r.destPort = j.value("destPort", 0);
-        r.appPath = j.value("appPath", "");
+
+        // Определяем тип порта на основе значения
+        r.sourcePortType = r.sourcePort == 0 ? PortMatchType::ANY : PortMatchType::SPECIFIC;
+        r.destPortType = r.destPort == 0 ? PortMatchType::ANY : PortMatchType::SPECIFIC;
+
         r.action = ActionFromString(j.value("action", "ALLOW"));
         r.enabled = j.value("enabled", true);
         r.direction = DirectionFromString(j.value("direction", "Inbound"));
+
+        // Дополнительная проверка согласованности
+        if (r.sourceIpType == IpMatchType::ANY) r.sourceIp = "";
+        if (r.destIpType == IpMatchType::ANY) r.destIp = "";
+        if (r.sourcePortType == PortMatchType::ANY) r.sourcePort = 0;
+        if (r.destPortType == PortMatchType::ANY) r.destPort = 0;
+
         rules.push_back(r);
         if (r.id >= nextRuleId) nextRuleId = r.id + 1;
     }
@@ -180,11 +253,20 @@ bool RuleManager::IsAllowed(const Connection& connection, int& matchedRuleId) {
     for (const auto& rule : rules) {
         if (!rule.enabled) continue;
 
-        bool sourceMatch = (rule.sourceIp.empty() || rule.sourceIp == connection.sourceIp);
-        bool destMatch = (rule.destIp.empty() || rule.destIp == connection.destIp);
+        // Проверка IP адресов с учетом типа
+        bool sourceMatch = (rule.sourceIpType == IpMatchType::ANY ||
+            (rule.sourceIpType == IpMatchType::SPECIFIC && rule.sourceIp == connection.sourceIp));
+        bool destMatch = (rule.destIpType == IpMatchType::ANY ||
+            (rule.destIpType == IpMatchType::SPECIFIC && rule.destIp == connection.destIp));
+
+        // Проверка протокола
         bool protocolMatch = (rule.protocol == Protocol::ANY || rule.protocol == connection.protocol);
-        bool sourcePortMatch = (rule.sourcePort == 0 || rule.sourcePort == connection.sourcePort);
-        bool destPortMatch = (rule.destPort == 0 || rule.destPort == connection.destPort);
+
+        // Проверка портов с учетом типа
+        bool sourcePortMatch = (rule.sourcePortType == PortMatchType::ANY ||
+            (rule.sourcePortType == PortMatchType::SPECIFIC && rule.sourcePort == connection.sourcePort));
+        bool destPortMatch = (rule.destPortType == PortMatchType::ANY ||
+            (rule.destPortType == PortMatchType::SPECIFIC && rule.destPort == connection.destPort));
 
         if (sourceMatch && destMatch && protocolMatch && sourcePortMatch && destPortMatch) {
             matchedRuleId = rule.id;
@@ -258,9 +340,9 @@ void FillRulesList(HWND hList) {
             filteredRules.push_back(rule);
     }
 
-    // Сортировка!
+    // Сортировка
     std::sort(filteredRules.begin(), filteredRules.end(), [](const Rule& a, const Rule& b) {
-        return a.id < b.id; // по возрастанию id
+        return a.id < b.id;
         });
 
     int itemIndex = 0;
@@ -270,11 +352,46 @@ void FillRulesList(HWND hList) {
         values[1] = rule.enabled ? L"Вкл" : L"Выкл";
         values[2] = rule.action == RuleAction::ALLOW ? L"Разрешить" : L"Блокировать";
         values[3] = Utf8ToWide(rule.appPath);
-        values[4] = Utf8ToWide(rule.sourceIp);
-        values[5] = Utf8ToWide(rule.destIp);
+
+        // Отладочный вывод
+        std::string debug = "Rule " + rule.name + ": ";
+        debug += " sourceIpType=" + IpMatchTypeToString(rule.sourceIpType);
+        debug += " sourceIp=" + rule.sourceIp;
+        debug += " destIpType=" + IpMatchTypeToString(rule.destIpType);
+        debug += " destIp=" + rule.destIp;
+        OutputDebugStringA(debug.c_str());
+
+        // IP адреса
+        if (rule.sourceIpType == IpMatchType::SPECIFIC && !rule.sourceIp.empty()) {
+            values[4] = Utf8ToWide(rule.sourceIp);
+        }
+        else {
+            values[4] = L"Любой";
+        }
+
+        if (rule.destIpType == IpMatchType::SPECIFIC && !rule.destIp.empty()) {
+            values[5] = Utf8ToWide(rule.destIp);
+        }
+        else {
+            values[5] = L"Любой";
+        }
+
         values[6] = Utf8ToWide(ProtocolToString(rule.protocol));
-        values[7] = rule.sourcePort == 0 ? L"Любой" : std::to_wstring(rule.sourcePort);
-        values[8] = rule.destPort == 0 ? L"Любой" : std::to_wstring(rule.destPort);
+
+        // Порты
+        if (rule.sourcePortType == PortMatchType::SPECIFIC && rule.sourcePort != 0) {
+            values[7] = std::to_wstring(rule.sourcePort);
+        }
+        else {
+            values[7] = L"Любой";
+        }
+
+        if (rule.destPortType == PortMatchType::SPECIFIC && rule.destPort != 0) {
+            values[8] = std::to_wstring(rule.destPort);
+        }
+        else {
+            values[8] = L"Любой";
+        }
 
         LVITEM lvi = { 0 };
         lvi.mask = LVIF_TEXT | LVIF_PARAM;
@@ -284,13 +401,14 @@ void FillRulesList(HWND hList) {
         lvi.lParam = rule.id;
         ListView_InsertItem(hList, &lvi);
 
+        // Устанавливаем остальные поля
         for (int i = 1; i < 9; ++i) {
-            LVITEM subLvi = { 0 };
-            subLvi.mask = LVIF_TEXT;
-            subLvi.iItem = itemIndex;
-            subLvi.iSubItem = i;
-            subLvi.pszText = (LPWSTR)values[i].c_str();
-            ListView_SetItem(hList, &subLvi);
+            LVITEM subItem = { 0 };
+            subItem.mask = LVIF_TEXT;
+            subItem.iItem = itemIndex;
+            subItem.iSubItem = i;
+            subItem.pszText = (LPWSTR)values[i].c_str();
+            ListView_SetItem(hList, &subItem);
         }
         itemIndex++;
     }

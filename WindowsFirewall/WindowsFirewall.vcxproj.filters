@@ -113,6 +113,9 @@
     <ClCompile Include="firewall_logger.cpp">
       <Filter>Source Files\Main\Utils</Filter>
     </ClCompile>
+    <ClCompile Include="connection_list_view.cpp">
+      <Filter>Source Files\Main\Utils</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="WindowsFirewall.rc">

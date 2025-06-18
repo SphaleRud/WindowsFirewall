@@ -12,6 +12,9 @@
 #include <thread>
 #include <algorithm>
 #include "types.h"
+#include <fwpmtypes.h>
+#include <fwpmu.h>
+#include "string_utils.h"
 
 class PacketInterceptor {
 public:

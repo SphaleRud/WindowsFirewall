@@ -55,6 +55,25 @@ std::string RuleManager::GetProtocolString(Protocol proto) const {
     }
 }
 
+bool RuleManager::FindBlockingRule(const PacketInfo& pkt, std::string& outRuleName) {
+    std::lock_guard<std::mutex> lock(ruleMutex);
+    for (const auto& rule : rules) {
+        if (!rule.enabled) continue;
+        if (rule.action != RuleAction::BLOCK) continue;
+        if (rule.protocol != Protocol::ANY && ProtocolToString(rule.protocol) != pkt.protocol)
+            continue;
+        if (!rule.sourceIp.empty() && rule.sourceIp != pkt.sourceIp) continue;
+        if (!rule.destIp.empty() && rule.destIp != pkt.destIp) continue;
+        if (rule.sourcePort != 0 && rule.sourcePort != pkt.sourcePort) continue;
+        if (rule.destPort != 0 && rule.destPort != pkt.destPort) continue;
+        if (!rule.appPath.empty() && pkt.processName != rule.appPath) continue;
+        outRuleName = rule.name.empty() ? rule.description : rule.name;
+        return true;
+    }
+    outRuleName.clear();
+    return false;
+}
+
 static std::string ActionToString(RuleAction act) { return act == RuleAction::ALLOW ? "ALLOW" : "BLOCK"; }
 static RuleAction ActionFromString(const std::string& str) { return str == "ALLOW" ? RuleAction::ALLOW : RuleAction::BLOCK; }
 static std::string DirectionToString(RuleDirection dir) { return dir == RuleDirection::Inbound ? "Inbound" : "Outbound"; }

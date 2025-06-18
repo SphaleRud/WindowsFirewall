@@ -750,6 +750,7 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
             items.push_back(StringToWString(packet.protocol));
             items.push_back(std::to_wstring(packet.processId));
             items.push_back(StringToWString(packet.processName));
+            items.push_back(packet.isBlocked ? L"Заблокирован" : L"Разрешен");
 
             connectionsListView.AddItem(items);
             displayedKeys.insert(key);
@@ -1204,7 +1205,8 @@ bool MainWindow::InitializeConnectionsList(int yPosition) {
         {L"Порт назначения", 60}, // 4
         {L"Протокол", 80},        // 5
 		{L"PID процесса", 80}, // 6
-        {L"Процесс", 150}         // 7
+        {L"Процесс", 150},         // 7
+        { L"Статус", 80 }           // 8
     };
 
     for (int i = 0; i < _countof(columns); i++) {
@@ -1253,6 +1255,7 @@ void MainWindow::UpdateGroupedPackets() {
         items.push_back(StringToWString(packet.protocol));
         items.push_back(std::to_wstring(packet.processId));
         items.push_back(StringToWString(packet.processName));
+        items.push_back(packet.isBlocked ? L"Заблокирован" : L"Разрешен");
 
         connectionsListView.AddItem(items);
     }
@@ -1281,6 +1284,8 @@ bool MainWindow::OnPacketCaptured(const PacketInfo& packet) {
         groupInfo.destPort = packet.destPort;
         groupInfo.direction = packet.direction;
         groupInfo.processPath = GetProcessPath(packet.processId);
+        groupInfo.isBlocked = packet.isBlocked;
+        groupInfo.blockReason = packet.blockReason;
 
         // Инициализируем размер и счетчик для нового пакета
         groupInfo.totalSize = packet.size;
@@ -1765,6 +1770,12 @@ INT_PTR CALLBACK MainWindow::PacketPropertiesDialogProc(HWND hwnd, UINT msg, WPA
 
         SetDlgItemText(hwnd, IDC_SOURCE_DOMAIN, L"Запрос...");
         SetDlgItemText(hwnd, IDC_DEST_DOMAIN, L"Запрос...");
+
+        if (packet->isBlocked) {
+            std::wstring blockDesc = L"Заблокирован правилом: ";
+            blockDesc += packet->blockReason.empty() ? L"(неизвестно)" : MainWindow::StringToWString(packet->blockReason);
+            SetDlgItemText(hwnd, IDC_BLOCK_DESC, blockDesc.c_str());
+        }
 
         // Время первого появления пакета
         if (!packet->time.empty()) {

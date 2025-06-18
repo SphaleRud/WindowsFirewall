@@ -25,7 +25,9 @@ enum class FirewallEventType {
     PACKETS_CLEARED, 
     PACKETS_SAVED,
     SERVICE_EVENT,
-    PACKETS_LOADED
+    PACKETS_LOADED,
+    PACKET_BLOCKED,
+    FILTER_APPLIED
 };  
 
 // Структура события
@@ -187,14 +189,19 @@ public:
             std::cerr << "Error in LogServiceEvent: " << e.what() << std::endl;
         }
     }
-
     void LogPacket(const PacketInfo& packet) {
         if (!isInitialized) return;
 
         std::lock_guard<std::mutex> lock(mutex);
         try {
             if (logFile.is_open()) {
-                logFile << "[" << GetTimestamp() << "] [PACKET] "
+                logFile << "[" << GetTimestamp() << "] [PACKET]";
+                if (packet.isBlocked) {
+                    logFile << " [BLOCKED]";
+                    if (!packet.blockReason.empty())
+                        logFile << " [" << packet.blockReason << "]";
+                }
+                logFile << " "
                     << packet.protocol << " "
                     << packet.sourceIp << ":" << packet.sourcePort << " -> "
                     << packet.destIp << ":" << packet.destPort << " "

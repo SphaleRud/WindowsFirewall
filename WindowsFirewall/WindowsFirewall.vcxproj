@@ -165,6 +165,7 @@
     <ClInclude Include="WindowsFirewall.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="connection_list_view.cpp" />
     <ClCompile Include="firewall_logger.cpp" />
     <ClCompile Include="main_window.cpp" />
     <ClCompile Include="packetinterceptor.cpp" />

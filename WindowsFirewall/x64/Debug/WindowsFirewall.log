@@ -1,5 +1,6 @@
-﻿  firewall_logger.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
+﻿  connection_list_view.cpp
+  firewall_logger.cpp
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(83,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'firewall_logger.cpp')
   
   main_window.cpp
@@ -13,24 +14,27 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(44,9): warning C4005: 'IDC
       C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winuser.h(10685,9):
       see previous definition of 'IDC_SIZE'
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(131,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
+D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(132,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
   (compiling source file 'main_window.cpp')
-      D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(127,9):
+      D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(128,9):
       see previous definition of 'IDC_RADIO_ALL'
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(83,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'main_window.cpp')
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1113,19): warning C4312: 'type cast': conversion from 'int' to 'HMENU' of greater size
-D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1177,73): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1583,23): warning C4244: 'initializing': conversion from 'LRESULT' to 'int', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1114,19): warning C4312: 'type cast': conversion from 'int' to 'HMENU' of greater size
+D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1178,73): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1588,23): warning C4244: 'initializing': conversion from 'LRESULT' to 'int', possible loss of data
   packetinterceptor.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(101,42): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(115,42): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(642,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(664,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(83,61): warning C4101: 'e': unreferenced local variable
+  (compiling source file 'packetinterceptor.cpp')
+  
+D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(102,42): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(116,42): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(643,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(665,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
   rule_manager.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(83,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'rule_manager.cpp')
   
 D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
@@ -43,16 +47,16 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(44,9): warning C4005: 'IDC
       C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winuser.h(10685,9):
       see previous definition of 'IDC_SIZE'
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(131,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
+D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(132,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
   (compiling source file 'rule_manager.cpp')
-      D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(127,9):
+      D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(128,9):
       see previous definition of 'IDC_RADIO_ALL'
   
 E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xutility(4813,18): warning C4244: '=': conversion from 'const wchar_t' to 'char', possible loss of data
   (compiling source file 'rule_manager.cpp')
       E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xutility(4813,18):
       the template instantiation context (the oldest one first) is
-          D:\Desktop\WindowsFirewall\WindowsFirewall\rule_manager.cpp(84,47):
+          D:\Desktop\WindowsFirewall\WindowsFirewall\rule_manager.cpp(103,47):
           see reference to function template instantiation 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string<std::_String_const_iterator<std::_String_val<std::_Simple_types<_Elem>>>,0>(_Iter,_Iter,const _Alloc &)' being compiled
           with
           [
@@ -60,7 +64,7 @@ E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xutility(4
               _Iter=std::_String_const_iterator<std::_String_val<std::_Simple_types<wchar_t>>>,
               _Alloc=std::allocator<char>
           ]
-              D:\Desktop\WindowsFirewall\WindowsFirewall\rule_manager.cpp(82,47):
+              D:\Desktop\WindowsFirewall\WindowsFirewall\rule_manager.cpp(101,47):
               see the first reference to 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string' in 'RuleManager::SaveRulesToFile'
           E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xstring(812,17):
           see reference to function template instantiation 'void std::basic_string<char,std::char_traits<char>,std::allocator<char>>::_Construct_from_iter<const wchar_t*,const wchar_t*,_Size_type>(_Iter,const _Sent,_Size)' being compiled
@@ -82,7 +86,7 @@ E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xutility(4
           ]
   
   rule_wizard.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(83,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'rule_wizard.cpp')
   
 D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
@@ -95,9 +99,9 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(44,9): warning C4005: 'IDC
       C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winuser.h(10685,9):
       see previous definition of 'IDC_SIZE'
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(131,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
+D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(132,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
   (compiling source file 'rule_wizard.cpp')
-      D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(127,9):
+      D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(128,9):
       see previous definition of 'IDC_RADIO_ALL'
   
   validator.cpp
@@ -111,9 +115,9 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(44,9): warning C4005: 'IDC
       C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winuser.h(10685,9):
       see previous definition of 'IDC_SIZE'
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(131,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
+D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(132,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
   (compiling source file 'validator.cpp')
-      D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(127,9):
+      D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(128,9):
       see previous definition of 'IDC_RADIO_ALL'
   
   WindowsFirewall.cpp
@@ -127,18 +131,18 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(44,9): warning C4005: 'IDC
       C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winuser.h(10685,9):
       see previous definition of 'IDC_SIZE'
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(131,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
+D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(132,9): warning C4005: 'IDC_RADIO_ALL': macro redefinition
   (compiling source file 'WindowsFirewall.cpp')
-      D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(127,9):
+      D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(128,9):
       see previous definition of 'IDC_RADIO_ALL'
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(83,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'WindowsFirewall.cpp')
   
   Generating Code...
 resource.h(42): warning RC4005: 'IDD_PACKET_PROPERTIES' : redefinition
   
-resource.h(131): warning RC4005: 'IDC_RADIO_ALL' : redefinition
+resource.h(132): warning RC4005: 'IDC_RADIO_ALL' : redefinition
   
 WindowsFirewall.rc(246): warning RC2182: duplicate dialog control ID 2
   

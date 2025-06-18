@@ -14,6 +14,7 @@
 #include <psapi.h> 
 #include <shlwapi.h>
 #include <map>
+#include "rule_manager.h"
 
 #pragma comment(lib, "Shlwapi.lib")
 #pragma comment(lib, "Psapi.lib")
@@ -782,6 +783,10 @@ void PacketInterceptor::ProcessPacket(const pcap_pkthdr* header, const u_char* p
             if (info.protocol.empty()) info.protocol = "Unknown";
             if (info.processName.empty()) info.processName = "Unknown";
             if (info.time.empty()) info.time = "Unknown";
+
+            std::string blockRuleName;
+            info.isBlocked = RuleManager::Instance().FindBlockingRule(info, blockRuleName);
+            info.blockReason = blockRuleName;
 
             // Callback
             try {

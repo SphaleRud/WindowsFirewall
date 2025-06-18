@@ -24,6 +24,8 @@ public:
     RuleManager(const RuleManager&) = delete;
     RuleManager& operator=(const RuleManager&) = delete;
 
+    bool FindBlockingRule(const PacketInfo& pkt, std::string& outRuleName);
+
     void ApplyAllRules();
 
     static RuleManager& Instance();

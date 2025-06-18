@@ -151,6 +151,8 @@ struct PacketInfo {
     std::string sourceDomain;
     std::string destDomain;
     std::string adapterIp;
+    bool isBlocked;      
+    std::string blockReason; 
     size_t size;
     uint16_t sourcePort;
     uint32_t  processId;
@@ -184,6 +186,8 @@ struct GroupedPacketInfo {
     size_t size;
     uint64_t totalSize;      // Общий размер всех пакетов
     uint32_t packetCount;    // Количество пакетов в группе
+    bool isBlocked = false;           // Новое поле
+    std::string blockReason;
 
     // Ключ для группировки (теперь с processId, нормализованный processName)
     std::string GetKey() const {

@@ -51,6 +51,7 @@
 #define IDC_BLOCK_IP					3010
 #define IDC_SOURCE_DOMAIN				3011
 #define IDC_DEST_DOMAIN					3012
+#define IDC_BLOCK_DESC					3013
 
 #define IDD_RULES_DIALOG                4000
 #define IDC_RULES_LIST                  4001
@@ -129,8 +130,6 @@
 #define IDC_RADIO_UDP					6103
 #define IDC_RADIO_TCP_UDP				6104
 #define IDC_RADIO_ALL					6105
-#define IDC_RADIO_BLACKLIST				6106
-#define IDC_RADIO_WHITELIST				6107
 #define IDC_STATIC                      -1
 
 // Next default values for new objects

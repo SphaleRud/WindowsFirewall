@@ -17,11 +17,3 @@ inline std::string WideToUtf8(const std::wstring& wstr) {
     WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), (int)wstr.size(), &str[0], size_needed, NULL, NULL);
     return str;
 }
-
-inline std::string GetFileNameFromPath(const std::string& path) {
-    size_t pos = path.find_last_of("/\\");
-    if (pos != std::string::npos) {
-        return path.substr(pos + 1);
-    }
-    return path;
-}

@@ -13,7 +13,6 @@
 #include "validator.h"
 #include "rule_wizard.h"
 #include <commctrl.h>
-#include <Shlwapi.h>
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -179,64 +178,26 @@ std::optional<Rule> RuleManager::GetRuleById(int ruleId) const {
     return std::nullopt;
 }
 
-
 bool RuleManager::IsAllowed(const Connection& connection, int& matchedRuleId) {
     std::lock_guard<std::mutex> lock(ruleMutex);
     matchedRuleId = -1;
-
-    OutputDebugStringA(("Checking connection - Process: " + connection.processName +
-        ", Protocol: " + std::to_string(static_cast<int>(connection.protocol)) +
-        ", Source: " + connection.sourceIp + ":" + std::to_string(connection.sourcePort) +
-        ", Dest: " + connection.destIp + ":" + std::to_string(connection.destPort) + "\n").c_str());
-
-    // Проходим по всем правилам
     for (const auto& rule : rules) {
-        if (!rule.enabled) {
-            OutputDebugStringA(("Skipping disabled rule: " + rule.name + "\n").c_str());
-            continue;
-        }
+        if (!rule.enabled) continue;
 
-        // Проверяем соответствие правилу
-        bool sourceMatch = (rule.sourceIp.empty() || rule.sourceIp == "0.0.0.0" || rule.sourceIp == connection.sourceIp);
-        bool destMatch = (rule.destIp.empty() || rule.destIp == "0.0.0.0" || rule.destIp == connection.destIp);
+        bool sourceMatch = (rule.sourceIp.empty() || rule.sourceIp == connection.sourceIp);
+        bool destMatch = (rule.destIp.empty() || rule.destIp == connection.destIp);
         bool protocolMatch = (rule.protocol == Protocol::ANY || rule.protocol == connection.protocol);
         bool sourcePortMatch = (rule.sourcePort == 0 || rule.sourcePort == connection.sourcePort);
         bool destPortMatch = (rule.destPort == 0 || rule.destPort == connection.destPort);
 
-        std::string matchInfo = "Rule check - " + rule.name +
-            "\nSource match: " + std::to_string(sourceMatch) +
-            "\nDest match: " + std::to_string(destMatch) +
-            "\nProtocol match: " + std::to_string(protocolMatch) +
-            "\nSource port match: " + std::to_string(sourcePortMatch) +
-            "\nDest port match: " + std::to_string(destPortMatch) + "\n";
-        OutputDebugStringA(matchInfo.c_str());
-
-        // Если все условия совпадают
         if (sourceMatch && destMatch && protocolMatch && sourcePortMatch && destPortMatch) {
-            // Проверяем соответствие процесса, если указан путь в правиле
-            if (!rule.appPath.empty()) {
-                std::string ruleProcessName = GetFileNameFromPath(rule.appPath);
-                bool processMatch = (connection.processName == ruleProcessName);
-
-                OutputDebugStringA(("Process check - Rule process: " + ruleProcessName +
-                    ", Connection process: " + connection.processName +
-                    ", Match: " + std::to_string(processMatch) + "\n").c_str());
-
-                if (!processMatch) {
-                    continue;
-                }
-            }
-
             matchedRuleId = rule.id;
-            OutputDebugStringA(("Rule matched: " + rule.name +
-                ", Action: " + (rule.action == RuleAction::ALLOW ? "ALLOW" : "BLOCK") + "\n").c_str());
-            return (rule.action == RuleAction::ALLOW);
+            return rule.action == RuleAction::ALLOW;
         }
     }
-
-    OutputDebugStringA("No matching rule found, default allow\n");
-    return true;
+    return true; // Разрешить по умолчанию, если не найдено подходящее правило
 }
+
 void RuleManager::Clear() {
     std::lock_guard<std::mutex> lock(ruleMutex);
     rules.clear();

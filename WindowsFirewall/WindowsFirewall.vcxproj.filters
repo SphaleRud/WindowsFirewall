@@ -87,15 +87,6 @@
     <ClInclude Include="rule_manager.h">
       <Filter>Header Files\Main\Core</Filter>
     </ClInclude>
-    <ClInclude Include="network_logger.h">
-      <Filter>Header Files\Main\Utils</Filter>
-    </ClInclude>
-    <ClInclude Include="shared_memory.h">
-      <Filter>Header Files\Main\Utils</Filter>
-    </ClInclude>
-    <ClInclude Include="shared_types.h">
-      <Filter>Header Files\Main\Utils</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="packetinterceptor.cpp">
@@ -115,9 +106,6 @@
     </ClCompile>
     <ClCompile Include="rule_manager.cpp">
       <Filter>Source Files\Main\Core</Filter>
-    </ClCompile>
-    <ClCompile Include="network_logger.cpp">
-      <Filter>Source Files\Main\Utils</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

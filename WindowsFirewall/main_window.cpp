@@ -1106,12 +1106,6 @@ void MainWindow::StartCapture() {
     OutputDebugString((L"Starting capture on adapter: " +
         StringToWString(selectedAdapterIp) + L"\n").c_str());
 
-    // Инициализируем логгер перед началом захвата
-    if (!packetInterceptor.InitializeLogger()) {
-        MessageBox(hwnd, L"Failed to initialize network logger", L"Error", MB_OK | MB_ICONERROR);
-        return;
-    }
-
     packetInterceptor.SetCurrentAdapter(selectedAdapterIp);
     if (packetInterceptor.StartCapture(selectedAdapterIp)) {
         isCapturing = true;

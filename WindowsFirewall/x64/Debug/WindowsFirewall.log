@@ -16,13 +16,12 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(131,9): warning C4005: 'ID
   
 D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(882,19): warning C4312: 'type cast': conversion from 'int' to 'HMENU' of greater size
 D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(946,73): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1357,23): warning C4244: 'initializing': conversion from 'LRESULT' to 'int', possible loss of data
-  network_logger.cpp
+D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1351,23): warning C4244: 'initializing': conversion from 'LRESULT' to 'int', possible loss of data
   packetinterceptor.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(107,42): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(121,42): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(683,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(705,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(101,42): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(115,42): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(617,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(639,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
   rule_manager.cpp
 D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
   (compiling source file 'rule_manager.cpp')
@@ -92,6 +91,6 @@ resource.h(42): warning RC4005: 'IDD_PACKET_PROPERTIES' : redefinition
   
 resource.h(131): warning RC4005: 'IDC_RADIO_ALL' : redefinition
   
-WindowsFirewall.rc(246): warning RC2182: duplicate dialog control ID 2
+WindowsFirewall.rc(250): warning RC2182: duplicate dialog control ID 2
   
   WindowsFirewall.vcxproj -> D:\Desktop\WindowsFirewall\x64\Debug\WindowsFirewall.exe

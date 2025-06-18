@@ -9,7 +9,6 @@ struct Connection {
     int sourcePort;
     int destPort;
     std::string appPath;
-    std::string processName;
 
     Connection()
         : protocol(Protocol::ANY)

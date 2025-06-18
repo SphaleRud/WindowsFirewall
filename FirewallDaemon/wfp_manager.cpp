@@ -8,7 +8,6 @@
 #include <iomanip>
 #include <algorithm>
 #include "string_utils.h"
-#include "shared_memory.h"
 
 #pragma comment(lib, "fwpuclnt.lib")
 #pragma comment(lib, "Ws2_32.lib")
@@ -213,7 +212,6 @@ bool WfpFilterManager::MakeAppIdBlob(const std::string& appPath, std::vector<uin
     return false;
 }
 
-
 bool WfpFilterManager::AddRule(const Rule& rule, bool isChildRule = false) {
     if (!engineHandle) {
         std::cerr << "[WFP] Engine handle is null" << std::endl;
@@ -250,24 +248,6 @@ bool WfpFilterManager::AddRule(const Rule& rule, bool isChildRule = false) {
             &FWPM_LAYER_ALE_AUTH_CONNECT_V6,
             &FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6
         };
-
-        if (rule.action == RuleAction::BLOCK) {
-            BlockedPacketEntry entry = {};
-
-            // Заполняем информацию о блокировке
-            strncpy_s(entry.processName, GetFileNameFromPath(rule.appPath).c_str(), _TRUNCATE);
-            strncpy_s(entry.sourceIp, rule.sourceIp.c_str(), _TRUNCATE);
-            strncpy_s(entry.destIp, rule.destIp.c_str(), _TRUNCATE);
-            entry.sourcePort = rule.sourcePort;
-            entry.destPort = rule.destPort;
-            strncpy_s(entry.protocol, ProtocolToString(rule.protocol).c_str(), _TRUNCATE);
-            entry.ruleId = rule.id;
-            GetSystemTimeAsFileTime(&entry.timestamp);
-            entry.isValid = true;
-
-            // Добавляем запись в разделяемую память
-            SharedMemoryManager::Instance().AddBlockedPacket(entry);
-        }
 
         for (const GUID* layerKey : layers) {
             FWPM_FILTER0 filter = { 0 };

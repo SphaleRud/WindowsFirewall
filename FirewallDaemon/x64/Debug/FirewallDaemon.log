@@ -1,5 +1,4 @@
-﻿E:\Programs\Microsoft Visual Studio\MSBuild\Microsoft\VC\v170\Microsoft.CppClean.targets(77,5): warning : Access to the path 'd:\desktop\windowsfirewall\x64\debug\firewalldaemon.exe' is denied.
-  rule_manager.cpp
+﻿  rule_manager.cpp
 D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
   (compiling source file '../WindowsFirewall/rule_manager.cpp')
       D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(25,9):

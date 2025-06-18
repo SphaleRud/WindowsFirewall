@@ -1,4 +1,7 @@
 ﻿  rule_manager.cpp
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+  (compiling source file '../WindowsFirewall/rule_manager.cpp')
+  
 D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
   (compiling source file '../WindowsFirewall/rule_manager.cpp')
       D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(25,9):
@@ -14,7 +17,43 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(131,9): warning C4005: 'ID
       D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(127,9):
       see previous definition of 'IDC_RADIO_ALL'
   
+E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xutility(4813,18): warning C4244: '=': conversion from 'const wchar_t' to 'char', possible loss of data
+  (compiling source file '../WindowsFirewall/rule_manager.cpp')
+      E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xutility(4813,18):
+      the template instantiation context (the oldest one first) is
+          D:\Desktop\WindowsFirewall\WindowsFirewall\rule_manager.cpp(84,47):
+          see reference to function template instantiation 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string<std::_String_const_iterator<std::_String_val<std::_Simple_types<_Elem>>>,0>(_Iter,_Iter,const _Alloc &)' being compiled
+          with
+          [
+              _Elem=wchar_t,
+              _Iter=std::_String_const_iterator<std::_String_val<std::_Simple_types<wchar_t>>>,
+              _Alloc=std::allocator<char>
+          ]
+              D:\Desktop\WindowsFirewall\WindowsFirewall\rule_manager.cpp(82,47):
+              see the first reference to 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string' in 'RuleManager::SaveRulesToFile'
+          E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xstring(812,17):
+          see reference to function template instantiation 'void std::basic_string<char,std::char_traits<char>,std::allocator<char>>::_Construct_from_iter<const wchar_t*,const wchar_t*,_Size_type>(_Iter,const _Sent,_Size)' being compiled
+          with
+          [
+              _Size_type=std::+::_Size_type,
+              _Iter=const wchar_t *,
+              _Sent=const wchar_t *,
+              _Size=std::+::_Size_type
+          ]
+          E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xstring(968,18):
+          see reference to function template instantiation '_OutIt *std::_Copy_n_unchecked4<const wchar_t*,_Size,char*>(_InIt,_SizeTy,_OutIt)' being compiled
+          with
+          [
+              _OutIt=char *,
+              _Size=std::+::_Size_type,
+              _InIt=const wchar_t *,
+              _SizeTy=std::+::_Size_type
+          ]
+  
   rule_wizard.cpp
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+  (compiling source file '../WindowsFirewall/rule_wizard.cpp')
+  
 D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
   (compiling source file '../WindowsFirewall/rule_wizard.cpp')
       D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(25,9):
@@ -31,6 +70,12 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(131,9): warning C4005: 'ID
       see previous definition of 'IDC_RADIO_ALL'
   
   FirewallDaemon.cpp
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+  (compiling source file 'FirewallDaemon.cpp')
+  
   wfp_manager.cpp
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+  (compiling source file 'wfp_manager.cpp')
+  
   Generating Code...
   FirewallDaemon.vcxproj -> D:\Desktop\WindowsFirewall\x64\Debug\FirewallDaemon.exe

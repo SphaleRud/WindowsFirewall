@@ -7,6 +7,7 @@
 #include "types.h"
 #include <Windows.h>
 #include "connection.h"
+#include "firewall_logger.h"
 
 class RuleManager {
 private:
@@ -17,6 +18,7 @@ private:
     mutable std::mutex ruleMutex;
     int nextRuleId = 1;
     RuleDirection currentDirection = RuleDirection::Inbound;
+    std::string GetProtocolString(Protocol proto) const;
 
 public:
     RuleManager(const RuleManager&) = delete;

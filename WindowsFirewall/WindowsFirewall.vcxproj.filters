@@ -87,6 +87,9 @@
     <ClInclude Include="rule_manager.h">
       <Filter>Header Files\Main\Core</Filter>
     </ClInclude>
+    <ClInclude Include="firewall_logger.h">
+      <Filter>Header Files\Main\Utils</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="packetinterceptor.cpp">
@@ -106,6 +109,9 @@
     </ClCompile>
     <ClCompile Include="rule_manager.cpp">
       <Filter>Source Files\Main\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="firewall_logger.cpp">
+      <Filter>Source Files\Main\Utils</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

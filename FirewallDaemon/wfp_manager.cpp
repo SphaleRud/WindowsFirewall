@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <algorithm>
 #include "string_utils.h"
+#include "firewall_logger.h"
 
 #pragma comment(lib, "fwpuclnt.lib")
 #pragma comment(lib, "Ws2_32.lib")
@@ -22,6 +23,10 @@ WfpFilterManager::~WfpFilterManager() {
 }
 
 bool WfpFilterManager::Initialize() {
+    FirewallLogger::Instance().LogServiceEvent(
+        FirewallEventType::SERVICE_STARTED,
+        "WFP Filter Manager initialization started"
+    );
     FWPM_SESSION session = { 0 };
     session.flags = FWPM_SESSION_FLAG_DYNAMIC;
 
@@ -124,6 +129,10 @@ ResolvedIPs ResolveDomain(const std::string& domain) {
 }
 
 void WfpFilterManager::RemoveAllRules() {
+    FirewallLogger::Instance().LogServiceEvent(
+        FirewallEventType::SERVICE_STARTED,
+        "Removing all WFP filters"
+    );
     if (!engineHandle) return;
 
     std::cout << "[WFP] Removing all rules..." << std::endl;
@@ -213,6 +222,11 @@ bool WfpFilterManager::MakeAppIdBlob(const std::string& appPath, std::vector<uin
 }
 
 bool WfpFilterManager::AddRule(const Rule& rule, bool isChildRule = false) {
+    FirewallEvent event;
+    event.type = FirewallEventType::RULE_ADDED;
+    event.ruleName = rule.name;
+    event.description = "WFP filter added";
+    event.username = FirewallLogger::Instance().GetCurrentUsername();
     if (!engineHandle) {
         std::cerr << "[WFP] Engine handle is null" << std::endl;
         return false;
@@ -289,6 +303,7 @@ bool WfpFilterManager::AddRule(const Rule& rule, bool isChildRule = false) {
 
             delete conditions[0].conditionValue.byteBlob;
         }
+        FirewallLogger::Instance().LogRuleEvent(event);
         return true;
     }
 

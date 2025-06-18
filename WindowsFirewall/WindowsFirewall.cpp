@@ -6,6 +6,7 @@
 #include "packetinterceptor.h"
 #include "rule_manager.h"
 #include "logger.h"
+#include "firewall_logger.h"
 
 #pragma comment(linker,"\"/manifestdependency:type='win32' \
 name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
@@ -52,6 +53,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         if (!mainWindow.Initialize(hInstance)) {
             MessageBox(NULL, L"Failed to initialize window", L"Error", MB_OK | MB_ICONERROR);
             return 1;
+        }
+        // Инициализируем логгер
+        if (!FirewallLogger::Instance().Initialize()) {
+            MessageBox(NULL, L"Failed to initialize logging system",
+                L"Error", MB_OK | MB_ICONERROR);
         }
 
         mainWindow.Show(nCmdShow);

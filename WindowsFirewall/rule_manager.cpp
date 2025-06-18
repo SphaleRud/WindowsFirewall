@@ -43,6 +43,18 @@ static Protocol ProtocolFromString(const std::string& str) {
     if (str == "ICMP") return Protocol::ICMP;
     return Protocol::ANY;
 }
+
+// Вспомогательная функция для преобразования Protocol в строку
+std::string RuleManager::GetProtocolString(Protocol proto) const {
+    switch (proto) {
+    case Protocol::TCP: return "TCP";
+    case Protocol::UDP: return "UDP";
+    case Protocol::ICMP: return "ICMP";
+    case Protocol::ANY: return "ANY";
+    default: return "UNKNOWN";
+    }
+}
+
 static std::string ActionToString(RuleAction act) { return act == RuleAction::ALLOW ? "ALLOW" : "BLOCK"; }
 static RuleAction ActionFromString(const std::string& str) { return str == "ALLOW" ? RuleAction::ALLOW : RuleAction::BLOCK; }
 static std::string DirectionToString(RuleDirection dir) { return dir == RuleDirection::Inbound ? "Inbound" : "Outbound"; }
@@ -67,6 +79,10 @@ bool RuleManager::SaveRulesToFile(const std::wstring& path) const {
         OutputDebugStringA("Не удалось создать rules.json!\n");
         return false;
     }
+    FirewallLogger::Instance().LogServiceEvent(
+        FirewallEventType::SERVICE_STARTED,
+        "Saving rules to file: " + std::string(path.begin(), path.end())
+    );
     OutputDebugStringA("rules.json успешно открыт для записи.\n");
     json arr = json::array();
     for (const auto& r : rules) {
@@ -93,6 +109,10 @@ bool RuleManager::SaveRulesToFile(const std::wstring& path) const {
 
 bool RuleManager::LoadRulesFromFile(const std::wstring& path) {
     std::lock_guard<std::mutex> lock(ruleMutex);
+    FirewallLogger::Instance().LogServiceEvent(
+        FirewallEventType::SERVICE_STARTED,
+        "Loading rules from file: " + std::string(path.begin(), path.end())
+    );
     std::ifstream f(path);
     if (!f) return false;
     json arr;
@@ -138,28 +158,116 @@ RuleDirection RuleManager::GetCurrentDirection() const {
 
 bool RuleManager::AddRule(const Rule& rule) {
     std::lock_guard<std::mutex> lock(ruleMutex);
+
+    // Создаем событие для логирования
+    FirewallEvent event;
+    event.type = FirewallEventType::RULE_ADDED;
+    event.ruleName = rule.name;
+    event.description = rule.description;
+    event.username = FirewallLogger::Instance().GetCurrentUsername();
+
+    std::stringstream details;
+    details << "Protocol: " << GetProtocolString(rule.protocol) << "\n"
+        << "Source IP: " << (rule.sourceIp.empty() ? "Any" : rule.sourceIp) << "\n"
+        << "Destination IP: " << (rule.destIp.empty() ? "Any" : rule.destIp) << "\n"
+        << "Source Port: " << (rule.sourcePort == 0 ? "Any" : std::to_string(rule.sourcePort)) << "\n"
+        << "Destination Port: " << (rule.destPort == 0 ? "Any" : std::to_string(rule.destPort)) << "\n"
+        << "Application Path: " << (rule.appPath.empty() ? "Any" : rule.appPath) << "\n"
+        << "Action: " << (rule.action == RuleAction::ALLOW ? "Allow" : "Block") << "\n"
+        << "Direction: " << (rule.direction == RuleDirection::Inbound ? "Inbound" : "Outbound") << "\n"
+        << "Enabled: " << (rule.enabled ? "Yes" : "No") << "\n"
+        << "Creator: " << rule.creator << "\n"
+        << "Creation Time: " << rule.creationTime;
+
+    event.newValue = details.str();
+
     Rule newRule = rule;
     newRule.id = nextRuleId++;
     rules.push_back(newRule);
     SaveRulesToFile();
+    FirewallLogger::Instance().LogRuleEvent(event);
     return true;
 }
 bool RuleManager::RemoveRule(int ruleId) {
     std::lock_guard<std::mutex> lock(ruleMutex);
     auto it = std::find_if(rules.begin(), rules.end(), [ruleId](const Rule& r) { return r.id == ruleId; });
     if (it != rules.end()) {
+        FirewallEvent event;
+        event.type = FirewallEventType::RULE_DELETED;
+        event.ruleName = it->name;
+        event.description = it->description;
+        event.username = FirewallLogger::Instance().GetCurrentUsername();
+        std::stringstream details;
+        details << "Rule ID: " << it->id << "\n"
+            << "Protocol: " << GetProtocolString(it->protocol) << "\n"
+            << "Source IP: " << (it->sourceIp.empty() ? "Any" : it->sourceIp) << "\n"
+            << "Destination IP: " << (it->destIp.empty() ? "Any" : it->destIp) << "\n"
+            << "Source Port: " << (it->sourcePort == 0 ? "Any" : std::to_string(it->sourcePort)) << "\n"
+            << "Destination Port: " << (it->destPort == 0 ? "Any" : std::to_string(it->destPort)) << "\n"
+            << "Application Path: " << (it->appPath.empty() ? "Any" : it->appPath) << "\n"
+            << "Action: " << (it->action == RuleAction::ALLOW ? "Allow" : "Block") << "\n"
+            << "Direction: " << (it->direction == RuleDirection::Inbound ? "Inbound" : "Outbound") << "\n"
+            << "Creator: " << it->creator << "\n"
+            << "Creation Time: " << it->creationTime;
+
+        event.previousValue = details.str();
         rules.erase(it);
         SaveRulesToFile();
+        FirewallLogger::Instance().LogRuleEvent(event);
         return true;
     }
     return false;
 }
-bool RuleManager::UpdateRule(const Rule& rule) {
+bool RuleManager::UpdateRule(const Rule& newRule) {
     std::lock_guard<std::mutex> lock(ruleMutex);
-    auto it = std::find_if(rules.begin(), rules.end(), [&rule](const Rule& r) { return r.id == rule.id; });
+    auto it = std::find_if(rules.begin(), rules.end(),
+        [&newRule](const Rule& r) { return r.id == newRule.id; });
     if (it != rules.end()) {
-        *it = rule;
+        // Сохраняем старые значения для лога
+        std::stringstream oldDetails;
+        oldDetails << "Rule ID: " << it->id << "\n"
+            << "Protocol: " << GetProtocolString(it->protocol) << "\n"
+            << "Source IP: " << (it->sourceIp.empty() ? "Any" : it->sourceIp) << "\n"
+            << "Destination IP: " << (it->destIp.empty() ? "Any" : it->destIp) << "\n"
+            << "Source Port: " << (it->sourcePort == 0 ? "Any" : std::to_string(it->sourcePort)) << "\n"
+            << "Destination Port: " << (it->destPort == 0 ? "Any" : std::to_string(it->destPort)) << "\n"
+            << "Application Path: " << (it->appPath.empty() ? "Any" : it->appPath) << "\n"
+            << "Action: " << (it->action == RuleAction::ALLOW ? "Allow" : "Block") << "\n"
+            << "Direction: " << (it->direction == RuleDirection::Inbound ? "Inbound" : "Outbound") << "\n"
+            << "Enabled: " << (it->enabled ? "Yes" : "No") << "\n"
+            << "Creator: " << it->creator << "\n"
+            << "Creation Time: " << it->creationTime;
+
+        // Обновляем правило
+        *it = newRule;
+
+        // Создаем событие для логирования
+        FirewallEvent event;
+        event.type = FirewallEventType::RULE_MODIFIED;
+        event.ruleName = newRule.name;
+        event.description = newRule.description;
+        event.username = FirewallLogger::Instance().GetCurrentUsername();
+        event.previousValue = oldDetails.str();
+
+        std::stringstream newDetails;
+        newDetails << "Rule ID: " << newRule.id << "\n"
+            << "Protocol: " << GetProtocolString(newRule.protocol) << "\n"
+            << "Source IP: " << (newRule.sourceIp.empty() ? "Any" : newRule.sourceIp) << "\n"
+            << "Destination IP: " << (newRule.destIp.empty() ? "Any" : newRule.destIp) << "\n"
+            << "Source Port: " << (newRule.sourcePort == 0 ? "Any" : std::to_string(newRule.sourcePort)) << "\n"
+            << "Destination Port: " << (newRule.destPort == 0 ? "Any" : std::to_string(newRule.destPort)) << "\n"
+            << "Application Path: " << (newRule.appPath.empty() ? "Any" : newRule.appPath) << "\n"
+            << "Action: " << (newRule.action == RuleAction::ALLOW ? "Allow" : "Block") << "\n"
+            << "Direction: " << (newRule.direction == RuleDirection::Inbound ? "Inbound" : "Outbound") << "\n"
+            << "Enabled: " << (newRule.enabled ? "Yes" : "No") << "\n"
+            << "Creator: " << newRule.creator << "\n"
+            << "Creation Time: " << newRule.creationTime;
+
+        event.newValue = newDetails.str();
+
         SaveRulesToFile();
+
+        FirewallLogger::Instance().LogRuleEvent(event);
         return true;
     }
     return false;

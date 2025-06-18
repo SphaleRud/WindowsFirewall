@@ -434,27 +434,42 @@ std::wstring MainWindow::FormatFileSize(size_t bytes) {
 
 void MainWindow::SaveAdapterPackets(const std::string& adapter) {
     if (adapter.empty()) {
+        FirewallLogger::Instance().LogServiceEvent(
+            FirewallEventType::SERVICE_ERROR,
+            "Failed to save packets: No adapter selected"
+        );
         MessageBox(hwnd, L"Адаптер не выбран!", L"Ошибка", MB_OK | MB_ICONERROR);
         return;
     }
-    char buf[MAX_PATH];
-    GetCurrentDirectoryA(MAX_PATH, buf);
-    // Показываем путь для отладки
-    // MessageBoxA(hwnd, buf, "Текущая папка", MB_OK);
 
-    std::string filename = "packets_" + adapter + ".csv";
-    std::ofstream fout(filename, std::ios::trunc);
-    if (!fout) {
-        MessageBox(hwnd, L"Не удалось создать файл!", L"Ошибка", MB_OK | MB_ICONERROR);
-        return;
-    }
     if (groupedPackets.empty()) {
+        FirewallLogger::Instance().LogServiceEvent(
+            FirewallEventType::SERVICE_ERROR,
+            "Failed to save packets: No packets to save for adapter: " + adapter
+        );
         MessageBox(hwnd, L"Нет ни одного пакета для сохранения!", L"Инфо", MB_OK | MB_ICONINFORMATION);
         return;
     }
+
+    char buf[MAX_PATH];
+    GetCurrentDirectoryA(MAX_PATH, buf);
+    std::string filename = "packets_" + adapter + ".csv";
+    std::ofstream fout(filename, std::ios::trunc);
+
+    if (!fout) {
+        FirewallLogger::Instance().LogServiceEvent(
+            FirewallEventType::SERVICE_ERROR,
+            "Failed to create file: " + filename + " in directory: " + buf
+        );
+        MessageBox(hwnd, L"Не удалось создать файл!", L"Ошибка", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    size_t packetCount = groupedPackets.size();
+
     for (const auto& pair : groupedPackets) {
         const auto& pkt = pair.second;
-        fout << pkt.time << ','  // Добавляем время первым полем
+        fout << pkt.time << ','
             << pkt.sourceIp << ','
             << pkt.destIp << ','
             << pkt.protocol << ','
@@ -467,6 +482,18 @@ void MainWindow::SaveAdapterPackets(const std::string& adapter) {
             << (pkt.direction == PacketDirection::Incoming ? "in" : "out") << '\n';
     }
     fout.close();
+
+    std::stringstream details;
+    details << "Saved packets to file\n"
+        << "Adapter: " << adapter << "\n"
+        << "File path: " << buf << "\\" << filename << "\n"
+        << "Total packets saved: " << packetCount;
+
+    FirewallLogger::Instance().LogServiceEvent(
+        FirewallEventType::PACKETS_SAVED,
+        details.str()
+    );
+
     MessageBox(hwnd, L"Список успешно сохранён!", L"Инфо", MB_OK | MB_ICONINFORMATION);
 }
 
@@ -610,13 +637,29 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
 void MainWindow::ClearSavedAdapterPackets(const std::string& adapter) {
     std::string filename = "packets_" + adapter + ".csv";
     std::remove(filename.c_str());
+
+    size_t clearedPacketsCount = adapterPackets[adapter].size();
     adapterPackets[adapter].clear();
+
     if (adapter == selectedAdapterIp) {
         groupedPackets.clear();
         UpdateGroupedPackets();
     }
+
+    std::stringstream details;
+    details << "Cleared saved packets for adapter\n"
+        << "Adapter: " << adapter << "\n"
+        << "File removed: " << filename << "\n"
+        << "Packets cleared: " << clearedPacketsCount;
+
+    FirewallLogger::Instance().LogServiceEvent(
+        FirewallEventType::PACKETS_CLEARED,
+        details.str()
+    );
+
     MessageBox(hwnd, L"Список успешно удалён!", L"Инфо", MB_OK | MB_ICONINFORMATION);
 }
+
 
 void MainWindow::ProcessPacket(const PacketInfo& info) {
     // Преобразование времени
@@ -696,7 +739,11 @@ void MainWindow::OnStartCapture() {
          MessageBox(hwnd, L"Please select an adapter first", L"Error", MB_OK | MB_ICONERROR);
          return;
      }
-
+     // Логируем начало захвата пакетов
+     FirewallLogger::Instance().LogServiceEvent(
+         FirewallEventType::CAPTURE_STARTED,
+         "Started packet capture on adapter: " + selectedAdapterIp
+     );
      // Устанавливаем callback для обработки пакетов
      OutputDebugStringA("OnStartCapture: SetPacketCallback called!\n");
      packetInterceptor.SetPacketCallback([this](const PacketInfo& packet) {
@@ -719,6 +766,14 @@ void MainWindow::OnStopCapture() {
     if (isCapturing) {
         packetInterceptor.StopCapture();
         isCapturing = false;
+        // Получаем количество пакетов из вашей структуры данных
+        size_t packetCount = groupedPackets.size();
+
+        FirewallLogger::Instance().LogServiceEvent(
+            FirewallEventType::CAPTURE_STOPPED,
+            "Stopped packet capture on adapter: " + selectedAdapterIp +
+            "\nTotal packet groups: " + std::to_string(packetCount)
+        );
         EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
         EnableWindow(GetDlgItem(hwnd, IDC_STOP_CAPTURE), FALSE);
         EnableWindow(GetDlgItem(hwnd, IDC_ADAPTER_COMBO), TRUE);
@@ -1038,7 +1093,8 @@ bool MainWindow::OnPacketCaptured(const PacketInfo& packet) {
             " dst=" + packet.destIp +
             " sport=" + std::to_string(packet.sourcePort) +
             " dport=" + std::to_string(packet.destPort) + "\n").c_str());
-
+        // Логируем пакет
+        FirewallLogger::Instance().LogPacket(packet);
         GroupedPacketInfo groupInfo;
         groupInfo.sourceIp = packet.sourceIp;
         groupInfo.destIp = packet.destIp;
@@ -1353,9 +1409,22 @@ void MainWindow::OnAdapterSelected() {
     if (selectedIndex != CB_ERR) {
         auto adapters = packetInterceptor.GetAdapters();
         if (selectedIndex < static_cast<int>(adapters.size())) {
+            // Получаем информацию о предыдущем и новом адаптере
+            std::string previousAdapter = selectedAdapterIp;
             selectedAdapterIp = adapters[selectedIndex].address;
             UpdateAdapterInfo();
+            // Логируем смену адаптера
+            std::stringstream details;
+            details << "Network adapter changed\n"
+                << "Previous: " << (previousAdapter.empty() ? "none" : previousAdapter) << "\n"
+                << "New: " << selectedAdapterIp << "\n"
+                << "Adapter name: " << adapters[selectedIndex].name << "\n"
+                << "Adapter description: " << adapters[selectedIndex].description;
 
+            FirewallLogger::Instance().LogServiceEvent(
+                FirewallEventType::ADAPTER_CHANGED,
+                details.str()
+            );
             // Всегда пробуем загрузить список с диска для выбранного адаптера
             LoadAdapterPackets(selectedAdapterIp);
 
@@ -1633,6 +1702,17 @@ void MainWindow::OpenSettingsDialog() {
     DialogBoxParam(hInstance, MAKEINTRESOURCE(IDD_SETTINGS_DIALOG), hwnd, SettingsDialogProc, (LPARAM)this);
 }
 
+// Вспомогательная функция для получения имени фильтра
+std::string GetFilterName(ProtocolFilter filter) {
+    switch (filter) {
+    case ProtocolFilter::All: return "All Protocols";
+    case ProtocolFilter::TCP_UDP: return "TCP and UDP";
+    case ProtocolFilter::TCP: return "TCP Only";
+    case ProtocolFilter::UDP: return "UDP Only";
+    default: return "Unknown";
+    }
+}
+
 INT_PTR CALLBACK MainWindow::SettingsDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     MainWindow* window;
     if (uMsg == WM_INITDIALOG) {
@@ -1661,19 +1741,43 @@ INT_PTR CALLBACK MainWindow::SettingsDialogProc(HWND hwndDlg, UINT uMsg, WPARAM 
     if (uMsg == WM_COMMAND) {
         if (LOWORD(wParam) == IDOK) {
             window = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hwndDlg, GWLP_USERDATA));
+
+            ProtocolFilter oldFilter = window->settings.protocolFilter;
+            // Инициализируем значением по умолчанию
+            ProtocolFilter newFilter = oldFilter; // значение по умолчанию - текущий фильтр
+
             if (IsDlgButtonChecked(hwndDlg, IDC_RADIO_ALL))
-                window->settings.protocolFilter = ProtocolFilter::All;
+                newFilter = ProtocolFilter::All;
             else if (IsDlgButtonChecked(hwndDlg, IDC_RADIO_TCP_UDP))
-                window->settings.protocolFilter = ProtocolFilter::TCP_UDP;
+                newFilter = ProtocolFilter::TCP_UDP;
             else if (IsDlgButtonChecked(hwndDlg, IDC_RADIO_TCP))
-                window->settings.protocolFilter = ProtocolFilter::TCP;
+                newFilter = ProtocolFilter::TCP;
             else if (IsDlgButtonChecked(hwndDlg, IDC_RADIO_UDP))
-                window->settings.protocolFilter = ProtocolFilter::UDP;
+                newFilter = ProtocolFilter::UDP;
+
+            // Логируем изменение фильтра только если он действительно изменился
+            if (oldFilter != newFilter) {
+                std::stringstream details;
+                details << "Protocol filter changed\n"
+                    << "Previous filter: " << GetFilterName(oldFilter) << "\n"
+                    << "New filter: " << GetFilterName(newFilter);
+
+                FirewallLogger::Instance().LogServiceEvent(
+                    FirewallEventType::FILTER_CHANGED,
+                    details.str()
+                );
+            }
+
+            window->settings.protocolFilter = newFilter;
             EndDialog(hwndDlg, IDOK);
             window->UpdateGroupedPackets();
             return TRUE;
         }
         if (LOWORD(wParam) == IDC_STOP_BLOCKER) {
+            FirewallLogger::Instance().LogServiceEvent(
+                FirewallEventType::FIREWALL_SERVICE_STOPPED,
+                "Blocker process stopped by user"
+            );
             StopBlockerProcess();
             Sleep(3000);
             SetDlgItemText(hwndDlg, IDC_BLOCKER_STATUS, L"Статус: остановлен");
@@ -1681,6 +1785,11 @@ INT_PTR CALLBACK MainWindow::SettingsDialogProc(HWND hwndDlg, UINT uMsg, WPARAM 
             return TRUE;
         }
         if (LOWORD(wParam) == IDCANCEL) {
+            // Добавим лог при закрытии окна настроек
+            FirewallLogger::Instance().LogServiceEvent(
+                FirewallEventType::SERVICE_EVENT,
+                "Settings dialog closed without changes"
+            );
             EndDialog(hwndDlg, IDCANCEL);
             return TRUE;
         }

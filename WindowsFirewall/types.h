@@ -40,28 +40,25 @@ struct AppSettings
 // —труктуры сетевого уровн€
 #pragma pack(push, 1)
 struct IPHeader {
-    unsigned char headerLength : 4;
-    unsigned char version : 4;
-    unsigned char typeOfService;
-    unsigned short totalLength;
-    unsigned short id;
-    unsigned short fragmentOffset;
-    unsigned char timeToLive;
-    unsigned char protocol; 
-    unsigned short checksum;
-    unsigned long sourceIP;
-    unsigned long destIP;
+    uint8_t  version_header;  // Version (4 bits) + Internet header length (4 bits)
+    uint8_t  typeOfService;   // Type of service
+    uint16_t totalLength;     // Total length
+    uint16_t id;             // Identification
+    uint16_t fragmentOffset;  // Flags (3 bits) + Fragment offset (13 bits)
+    uint8_t  timeToLive;     // Time to live
+    uint8_t  protocol;       // Protocol
+    uint16_t checksum;       // Header checksum
+    uint32_t sourceIP;       // Source address
+    uint32_t destIP;         // Destination address
 };
-#pragma pack(pop)
 
-#pragma pack(push, 1)
 struct TCPHeader {
     uint16_t sourcePort;
     uint16_t destPort;
     uint32_t sequenceNumber;
     uint32_t acknowledgementNumber;
-    uint8_t dataOffset;  // старшие 4 бита
-    uint8_t flags;
+    uint8_t  dataOffset;    // Data offset (4 bits) + Reserved (4 bits)
+    uint8_t  flags;
     uint16_t window;
     uint16_t checksum;
     uint16_t urgentPointer;

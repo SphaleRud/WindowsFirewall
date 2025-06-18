@@ -6,6 +6,7 @@
 #include <atomic>
 #include "rule_manager.h"
 #include "wfp_manager.h"
+#include "shared_memory.h"
 
 #define CHECK_INTERVAL_MILLISECONDS 500
 
@@ -109,6 +110,12 @@ int main() {
     HANDLE hStopEvent = CreateEventW(NULL, TRUE, FALSE, L"Global\\FirewallDaemonStopEvent");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         std::cout << "Daemon already running.\n";
+        return 1;
+    }
+
+    // Инициализируем разделяемую память
+    if (!SharedMemoryManager::Instance().Initialize(true)) {
+        std::cerr << "Failed to initialize shared memory in daemon\n";
         return 1;
     }
 

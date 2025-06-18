@@ -6,6 +6,7 @@
 #include "packetinterceptor.h"
 #include "rule_manager.h"
 #include "logger.h"
+#include "shared_memory.h"
 
 #pragma comment(linker,"\"/manifestdependency:type='win32' \
 name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
@@ -53,7 +54,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             MessageBox(NULL, L"Failed to initialize window", L"Error", MB_OK | MB_ICONERROR);
             return 1;
         }
-
+        // Инициализируем разделяемую память
+        if (!SharedMemoryManager::Instance().Initialize(false)) {
+            MessageBox(NULL, L"Failed to initialize shared memory",
+                L"Error", MB_OK | MB_ICONERROR);
+            return 1;
+        }
         mainWindow.Show(nCmdShow);
 
         MSG msg;

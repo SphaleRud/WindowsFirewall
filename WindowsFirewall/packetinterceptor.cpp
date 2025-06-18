@@ -13,7 +13,13 @@
 #include "logger.h"
 #include <psapi.h> 
 #include <shlwapi.h>
+#include <vector>
+#include <string>
+#include <algorithm>
 #include <map>
+#include <regex> 
+#include "rule_manager.h"
+#include "shared_memory.h"
 
 #pragma comment(lib, "Shlwapi.lib")
 #pragma comment(lib, "Psapi.lib")
@@ -123,14 +129,31 @@ bool GetProcessInfoByPortAndProto(uint16_t port, const std::string& proto, uint3
     if (pid != 0) {
         HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid);
         if (hProc) {
-            wchar_t wname[MAX_PATH] = L"";
-            if (GetModuleFileNameExW(hProc, NULL, wname, MAX_PATH)) {
-                LPCWSTR baseName = PathFindFileNameW(wname);
-                char mbname[MAX_PATH] = "";
-                WideCharToMultiByte(CP_UTF8, 0, baseName, -1, mbname, MAX_PATH, NULL, NULL);
-                pname = std::string(mbname);
+            // Получаем полный путь к процессу
+            wchar_t fullPath[MAX_PATH] = L"";
+            DWORD pathSize = MAX_PATH;
+            if (QueryFullProcessImageNameW(hProc, 0, fullPath, &pathSize)) {
+                // Получаем только имя файла из полного пути
+                wchar_t* fileName = PathFindFileNameW(fullPath);
+
+                // Конвертируем в UTF-8
+                int size_needed = WideCharToMultiByte(CP_UTF8, 0, fileName, -1, NULL, 0, NULL, NULL);
+                std::vector<char> buffer(size_needed);
+                WideCharToMultiByte(CP_UTF8, 0, fileName, -1, buffer.data(), size_needed, NULL, NULL);
+                pname = std::string(buffer.data());
+
+                // Добавляем отладочную информацию
+                std::string debugInfo = "Process Info - PID: " + std::to_string(pid) +
+                    ", Name: " + pname +
+                    ", Port: " + std::to_string(port) +
+                    ", Proto: " + proto + "\n";
+                OutputDebugStringA(debugInfo.c_str());
             }
             CloseHandle(hProc);
+        }
+        else {
+            OutputDebugStringA(("Failed to open process " + std::to_string(pid) +
+                ". Error: " + std::to_string(GetLastError()) + "\n").c_str());
         }
     }
     return pid != 0;
@@ -351,53 +374,94 @@ bool PacketInterceptor::Initialize() {
     return true;
 }
 
+// Добавьте эту вспомогательную функцию для генерации имени файла
+std::string PacketInterceptor::GetCurrentTimestamp() const {
+    time_t now = time(nullptr);
+    struct tm timeinfo;
+    char buffer[80];
+    localtime_s(&timeinfo, &now);
+    strftime(buffer, sizeof(buffer), "%Y%m%d_%H%M%S", &timeinfo);
+    return std::string(buffer);
+}
+
 bool PacketInterceptor::StartCapture(const std::string& adapterIp) {
     if (isRunning) {
         OutputDebugStringA("Capture already running\n");
         return false;
     }
 
+    // Валидация IP адреса
+    struct sockaddr_in sa;
+    if (inet_pton(AF_INET, adapterIp.c_str(), &(sa.sin_addr)) != 1) {
+        OutputDebugStringA("Invalid IP address format\n");
+        return false;
+    }
+
+    // Инициализируем логгер при старте захвата
+    std::string timestamp = GetCurrentTimestamp();
+    std::string logFileName = "network_" + adapterIp + "_" + timestamp + ".log";
+    logFileName = std::regex_replace(logFileName, std::regex("[:\\s]"), "_"); // Заменяем недопустимые символы
+
+    if (!InitializeLogger(logFileName)) {
+        OutputDebugStringA("Failed to initialize network logger\n");
+        return false;
+    }
+    OutputDebugStringA(("Logger initialized: " + logFileName + "\n").c_str());
+
     char errbuf[PCAP_ERRBUF_SIZE] = { 0 };
 
     // Находим адаптер по IP
     pcap_if_t* alldevs;
     if (pcap_findalldevs(&alldevs, errbuf) == -1) {
-        std::string error = "Failed to find devices: " + std::string(errbuf);
-        OutputDebugStringA(error.c_str());
+        OutputDebugStringA(("Failed to find devices: " + std::string(errbuf) + "\n").c_str());
         return false;
     }
 
+    // Используем unique_ptr для автоматической очистки
+    std::unique_ptr<pcap_if_t*, void(*)(pcap_if_t**)> devicesGuard(
+        &alldevs,
+        [](pcap_if_t** p) { if (p && *p) pcap_freealldevs(*p); }
+    );
+
     pcap_if_t* device = nullptr;
+    std::string foundDeviceName;
+    std::string foundDeviceDesc;
+
+    // Выводим список всех адаптеров для отладки
+    OutputDebugStringA("Available network adapters:\n");
     for (pcap_if_t* d = alldevs; d != nullptr; d = d->next) {
+        std::string deviceInfo = "Device: " + std::string(d->name) +
+            "\nDescription: " + (d->description ? d->description : "No description");
+
         for (pcap_addr_t* a = d->addresses; a != nullptr; a = a->next) {
-            if (a->addr->sa_family == AF_INET) {
+            if (a->addr && a->addr->sa_family == AF_INET) {
                 char ip[INET_ADDRSTRLEN];
                 struct sockaddr_in* sin = (struct sockaddr_in*)a->addr;
                 inet_ntop(AF_INET, &(sin->sin_addr), ip, INET_ADDRSTRLEN);
+                deviceInfo += "\nIP: " + std::string(ip);
+
                 if (adapterIp == ip) {
                     device = d;
-                    break;
+                    foundDeviceName = d->name;
+                    foundDeviceDesc = d->description ? d->description : "No description";
                 }
             }
         }
-        if (device) break;
+        OutputDebugStringA((deviceInfo + "\n\n").c_str());
     }
 
     if (!device) {
-        pcap_freealldevs(alldevs);
-        OutputDebugStringA("No matching device found\n");
+        OutputDebugStringA(("No adapter found with IP: " + adapterIp + "\n").c_str());
         return false;
     }
 
-    std::string deviceName = device->name;
-    OutputDebugStringA(("Opening device: " + deviceName + "\n").c_str());
+    OutputDebugStringA(("Selected adapter:\nName: " + foundDeviceName +
+        "\nDescription: " + foundDeviceDesc + "\n").c_str());
 
-    // Открываем устройство для статистики чтобы проверить его работоспособность
+    // Проверяем работоспособность адаптера
     pcap_t* testHandle = pcap_open_live(device->name, 65536, 0, 1000, errbuf);
     if (!testHandle) {
-        std::string error = "Failed to open device for testing: " + std::string(errbuf);
-        OutputDebugStringA(error.c_str());
-        pcap_freealldevs(alldevs);
+        OutputDebugStringA(("Failed to open device for testing: " + std::string(errbuf) + "\n").c_str());
         return false;
     }
 
@@ -410,20 +474,17 @@ bool PacketInterceptor::StartCapture(const std::string& adapterIp) {
     }
     pcap_close(testHandle);
 
-    // Теперь открываем для реального захвата
+    // Открываем для реального захвата
     handle = pcap_open_live(
         device->name,
         65536,          // snaplen
         1,              // promiscuous mode
-        50,             // read timeout - уменьшаем до 50мс
+        50,             // read timeout
         errbuf
     );
 
-    pcap_freealldevs(alldevs);
-
     if (!handle) {
-        std::string error = "Failed to open device for capture: " + std::string(errbuf);
-        OutputDebugStringA(error.c_str());
+        OutputDebugStringA(("Failed to open device for capture: " + std::string(errbuf) + "\n").c_str());
         return false;
     }
 
@@ -431,42 +492,44 @@ bool PacketInterceptor::StartCapture(const std::string& adapterIp) {
     int linkType = pcap_datalink(handle);
     OutputDebugStringA(("Link type: " + std::to_string(linkType) + "\n").c_str());
 
-    // Устанавливаем буфер большего размера
-    if (pcap_setbuff(handle, 512000) != 0) {
+    // Устанавливаем больший буфер
+    if (pcap_setbuff(handle, 1024000) != 0) {
         OutputDebugStringA("Warning: Failed to set buffer size\n");
     }
 
-    // Устанавливаем режим буферизации
+    // Устанавливаем неблокирующий режим
     if (pcap_setnonblock(handle, 1, errbuf) == -1) {
         OutputDebugStringA(("Warning: Failed to set nonblocking mode: " + std::string(errbuf) + "\n").c_str());
     }
 
     // Компилируем и устанавливаем фильтр
     struct bpf_program fcode;
-    // Расширяем фильтр для захвата всех интересующих протоколов
-    const char* filter = "ip";
+    const char* filter = "ip"; // Можно расширить фильтр при необходимости
     if (pcap_compile(handle, &fcode, filter, 1, PCAP_NETMASK_UNKNOWN) < 0) {
         std::string error = "Failed to compile filter: " + std::string(pcap_geterr(handle));
-        OutputDebugStringA(error.c_str());
+        OutputDebugStringA((error + "\n").c_str());
         pcap_close(handle);
         handle = nullptr;
         return false;
     }
+
+    std::unique_ptr<bpf_program, void(*)(bpf_program*)> filterGuard(
+        &fcode,
+        [](bpf_program* p) { pcap_freecode(p); }
+    );
 
     if (pcap_setfilter(handle, &fcode) < 0) {
         std::string error = "Failed to set filter: " + std::string(pcap_geterr(handle));
-        OutputDebugStringA(error.c_str());
+        OutputDebugStringA((error + "\n").c_str());
         pcap_close(handle);
         handle = nullptr;
         return false;
     }
 
-    pcap_freecode(&fcode);
-
     isRunning = true;
     try {
-        captureThread = std::thread(CaptureThread, this);
-        OutputDebugStringA("Capture thread started\n");
+        captureThread = std::thread(&PacketInterceptor::CaptureThread, this);
+        OutputDebugStringA("Capture thread started successfully\n");
         return true;
     }
     catch (const std::exception& e) {
@@ -475,8 +538,7 @@ bool PacketInterceptor::StartCapture(const std::string& adapterIp) {
             pcap_close(handle);
             handle = nullptr;
         }
-        std::string error = "Failed to start capture thread: " + std::string(e.what()) + "\n";
-        OutputDebugStringA(error.c_str());
+        OutputDebugStringA(("Failed to start capture thread: " + std::string(e.what()) + "\n").c_str());
         return false;
     }
 }
@@ -497,6 +559,10 @@ bool PacketInterceptor::StopCapture() {
     if (captureThread.joinable()) {
         captureThread.join();
     }
+
+    // Закрываем логгер
+    logger.Close();
+    OutputDebugStringA("Logger closed\n");
 
     // Закрываем handle
     if (handle) {
@@ -654,131 +720,177 @@ std::string PacketInterceptor::GetProcessNameByPort(unsigned short port) {
     return "Unknown";
 }
 
+// Добавьте реализацию функции
+bool PacketInterceptor::InitializeLogger(const std::string& logPath) {
+    return logger.Initialize(logPath);
+}
+
 void PacketInterceptor::ProcessPacket(const pcap_pkthdr* header, const u_char* packet) {
-    // Проверка входных параметров
-    if (!header || !packet || !packetCallback) {
-        OutputDebugStringA("ProcessPacket: Invalid parameters\n");
+    if (!header || !packet) {
+        OutputDebugStringA("ProcessPacket: Invalid header or packet pointer\n");
         return;
     }
-    try {
 
-        size_t len = header->len;
-        // --- Ограничение на поток пакетов ---
-        static std::atomic<size_t> packetCount = 0;
-        static std::atomic<time_t> lastTime = 0;
-        time_t now = time(nullptr);
-        if (now != lastTime) {
-            lastTime = now;
-            packetCount = 0;
-        }
-        if (++packetCount > 500) { // Не более 500 пакетов в секунду
+    try {
+        // Проверяем минимальный размер пакета (IP заголовок)
+        if (header->len < sizeof(IPHeader) || header->caplen < sizeof(IPHeader)) {
+            OutputDebugStringA("ProcessPacket: Packet too small for IP header\n");
             return;
         }
 
-        int ipOffset = 0;
-        bool hasEthernet = false;
+        // Определяем размер пакета для копирования
+        size_t packetSize = (header->len < header->caplen) ? header->len : header->caplen;
 
-        // --- Определяем, есть ли Ethernet header ---
-        if (len >= 14) {
-            uint16_t etherType = ntohs(*(uint16_t*)(packet + 12));
-            if (etherType == 0x0800 || etherType == 0x86DD) {
-                hasEthernet = true;
-                ipOffset = 14;
+        // Создаем локальную копию данных пакета
+        std::vector<u_char> packetCopy;
+        packetCopy.reserve(packetSize);
+        packetCopy.assign(packet, packet + packetSize);
+
+        // Для отладки
+        OutputDebugStringA(("ProcessPacket: Packet size = " + std::to_string(packetSize) +
+            ", Captured length = " + std::to_string(header->caplen) +
+            ", Actual length = " + std::to_string(header->len) + "\n").c_str());
+
+        // Для link-layer типа LINKTYPE_RAW (12), IP заголовок начинается сразу
+        if (packetCopy.size() < sizeof(IPHeader)) {
+            OutputDebugStringA("ProcessPacket: Packet copy too small for IP header\n");
+            return;
+        }
+
+        const IPHeader* ipHeader = reinterpret_cast<const IPHeader*>(packetCopy.data());
+
+        // Проверяем версию IP
+        uint8_t version = (ipHeader->version_header >> 4) & 0xF;
+        if (version != 4) {
+            return;  // Пока обрабатываем только IPv4
+        }
+
+        // Вычисляем размер IP заголовка
+        uint8_t ipHeaderLength = (ipHeader->version_header & 0xF) * 4;
+        if (packetCopy.size() < ipHeaderLength) {
+            OutputDebugStringA("ProcessPacket: Packet too small for full IP header\n");
+            return;
+        }
+
+        PacketInfo info;
+        info.time = GetCurrentTimestamp();
+        info.size = header->len;
+
+        // Получаем IP адреса
+        char sourceIP[INET_ADDRSTRLEN] = { 0 };
+        char destIP[INET_ADDRSTRLEN] = { 0 };
+
+        if (!inet_ntop(AF_INET, &(ipHeader->sourceIP), sourceIP, INET_ADDRSTRLEN) ||
+            !inet_ntop(AF_INET, &(ipHeader->destIP), destIP, INET_ADDRSTRLEN)) {
+            OutputDebugStringA("ProcessPacket: Failed to convert IP addresses\n");
+            return;
+        }
+
+        info.sourceIp = sourceIP;
+        info.destIp = destIP;
+
+        // Определяем протокол и порты
+        switch (ipHeader->protocol) {
+        case IPPROTO_TCP: {
+            if (packetCopy.size() >= ipHeaderLength + sizeof(TCPHeader)) {
+                const TCPHeader* tcpHeader = reinterpret_cast<const TCPHeader*>(
+                    packetCopy.data() + ipHeaderLength);
+                info.protocol = "TCP";
+                info.sourcePort = ntohs(tcpHeader->sourcePort);
+                info.destPort = ntohs(tcpHeader->destPort);
+
+                OutputDebugStringA(("TCP Packet - Source: " + info.sourceIp + ":" +
+                    std::to_string(info.sourcePort) + " Dest: " + info.destIp + ":" +
+                    std::to_string(info.destPort) + "\n").c_str());
             }
+            break;
         }
-        if (!hasEthernet) {
-            ipOffset = 0;
-            if (len < 20) return; // слишком короткий для IP
+        case IPPROTO_UDP: {
+            if (packetCopy.size() >= ipHeaderLength + sizeof(UDPHeader)) {
+                const UDPHeader* udpHeader = reinterpret_cast<const UDPHeader*>(
+                    packetCopy.data() + ipHeaderLength);
+                info.protocol = "UDP";
+                info.sourcePort = ntohs(udpHeader->sourcePort);
+                info.destPort = ntohs(udpHeader->destPort);
+
+                OutputDebugStringA(("UDP Packet - Source: " + info.sourceIp + ":" +
+                    std::to_string(info.sourcePort) + " Dest: " + info.destIp + ":" +
+                    std::to_string(info.destPort) + "\n").c_str());
+            }
+            break;
         }
-
-        const u_char* ipStart = packet + ipOffset;
-
-        // --- Определяем версию IP ---
-        uint8_t version = (ipStart[0] >> 4) & 0x0F;
-        if (version == 4) {
-            if (len < ipOffset + 20) return;
-            const IPHeader* ipHeader = reinterpret_cast<const IPHeader*>(ipStart);
-
-            PacketInfo info = {};
-            info.processId = 0;
-            info.processName = "Unknown";
-
-            // Время
-            SYSTEMTIME st = {};
-            GetSystemTime(&st);
-            char timeBuffer[32] = {};
-            sprintf_s(timeBuffer, sizeof(timeBuffer), "%04d-%02d-%02d %02d:%02d:%02d",
-                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-            info.time = timeBuffer;
-
-            // IP
-            char srcIP[INET_ADDRSTRLEN] = {}, dstIP[INET_ADDRSTRLEN] = {};
-            inet_ntop(AF_INET, &(ipHeader->sourceIP), srcIP, INET_ADDRSTRLEN);
-            inet_ntop(AF_INET, &(ipHeader->destIP), dstIP, INET_ADDRSTRLEN);
-            info.sourceIp = srcIP;
-            info.destIp = dstIP;
-
-            // Протокол, размер
-            info.protocol = GetProtocolName(ipHeader->protocol);
-            info.size = header->len;
-
-            info.direction = DeterminePacketDirection(srcIP);
-
-            // Порты
-            int ipHeaderLength = (ipHeader->headerLength & 0x0F) * 4;
+        case IPPROTO_ICMP:
+            info.protocol = "ICMP";
             info.sourcePort = 0;
             info.destPort = 0;
-            if (ipHeader->protocol == IPPROTO_TCP) {
-                if (len >= ipOffset + ipHeaderLength + sizeof(TCPHeader)) {
-                    const TCPHeader* tcp = reinterpret_cast<const TCPHeader*>(ipStart + ipHeaderLength);
-                    info.sourcePort = ntohs(tcp->sourcePort);
-                    info.destPort = ntohs(tcp->destPort);
-                }
-            }
-            else if (ipHeader->protocol == IPPROTO_UDP) {
-                if (len >= ipOffset + ipHeaderLength + sizeof(UDPHeader)) {
-                    const UDPHeader* udp = reinterpret_cast<const UDPHeader*>(ipStart + ipHeaderLength);
-                    info.sourcePort = ntohs(udp->sourcePort);
-                    info.destPort = ntohs(udp->destPort);
-                }
-            }
+            OutputDebugStringA("ICMP Packet captured\n");
+            break;
+        default:
+            info.protocol = "Unknown";
+            info.sourcePort = 0;
+            info.destPort = 0;
+            OutputDebugStringA("Unknown protocol packet captured\n");
+            break;
+        }
 
-            // PID и имя процесса
-            uint32_t pid = 0;
-            std::string pname = "Unknown";
-            uint16_t localPort = (info.direction == PacketDirection::Outgoing) ? info.sourcePort : info.destPort;
-            GetProcessInfoByPortAndProto(localPort, info.protocol, pid, pname);
+        // Определяем направление пакета
+        info.direction = IsLocalAddress(info.sourceIp) ?
+            PacketDirection::Outgoing : PacketDirection::Incoming;
+
+        // Получаем информацию о процессе
+        uint32_t pid = 0;
+        std::string pname = "Unknown";
+        uint16_t localPort = (info.direction == PacketDirection::Outgoing) ?
+            info.sourcePort : info.destPort;
+
+        if (GetProcessInfoByPortAndProto(localPort, info.protocol, pid, pname)) {
             info.processId = pid;
             info.processName = pname;
 
-            if (info.sourceIp.empty()) info.sourceIp = "Unknown";
-            if (info.destIp.empty()) info.destIp = "Unknown";
-            if (info.protocol.empty()) info.protocol = "Unknown";
-            if (info.processName.empty()) info.processName = "Unknown";
-            if (info.time.empty()) info.time = "Unknown";
+            OutputDebugStringA(("Process Info - PID: " + std::to_string(pid) +
+                ", Name: " + pname + ", Port: " + std::to_string(localPort) +
+                ", Proto: " + info.protocol + "\n").c_str());
+        }
 
-            // Callback
-            try {
+        // Проверяем блокировки в WFP
+        try {
+            auto blockedPackets = SharedMemoryManager::Instance().GetBlockedPackets();
+            bool isBlocked = false;
+            std::string blockReason;
+
+            for (const auto& blockedPacket : blockedPackets) {
+                if (std::string(blockedPacket.sourceIp) == info.sourceIp &&
+                    std::string(blockedPacket.destIp) == info.destIp &&
+                    blockedPacket.sourcePort == info.sourcePort &&
+                    blockedPacket.destPort == info.destPort &&
+                    std::string(blockedPacket.protocol) == info.protocol) {
+
+                    isBlocked = true;
+                    auto rule = RuleManager::Instance().GetRuleById(blockedPacket.ruleId);
+                    if (rule) {
+                        blockReason = "BLOCKED by " + rule->name;
+                    }
+                    break;
+                }
+            }
+
+            // Логируем пакет
+            std::string logMessage = isBlocked ? blockReason : "ALLOWED";
+            logger.LogPacket(info, logMessage);
+
+            // Вызываем callback только для неблокированных пакетов
+            if (!isBlocked && packetCallback) {
                 packetCallback(info);
             }
-            catch (const std::exception& e) {
-                OutputDebugStringA(("ProcessPacket callback error: " + std::string(e.what()) + "\n").c_str());
-            }
         }
-        else if (version == 6) {
-            // Можно реализовать разбор IPv6
-            // Пока просто пропускаем такие пакеты
-            return;
-        }
-        else {
-            // Неизвестный протокол
-            return;
+        catch (const std::exception& e) {
+            OutputDebugStringA(("Error checking WFP blocks: " + std::string(e.what()) + "\n").c_str());
         }
     }
     catch (const std::exception& e) {
-        OutputDebugStringA(("ProcessPacket error: " + std::string(e.what()) + "\n").c_str());
+        OutputDebugStringA(("ProcessPacket exception: " + std::string(e.what()) + "\n").c_str());
     }
     catch (...) {
-        OutputDebugStringA("ProcessPacket: Unknown error occurred\n");
+        OutputDebugStringA("ProcessPacket: Unknown exception\n");
     }
 }

@@ -12,6 +12,7 @@
 #include <thread>
 #include <algorithm>
 #include "types.h"
+#include "network_logger.h"
 
 class PacketInterceptor {
 public:
@@ -41,6 +42,8 @@ public:
         packetCallback = callback;
     }
     std::vector<AdapterInfo> GetAdapters();
+    bool InitializeLogger(const std::string& logPath = "network_events.log");
+
 protected:
     void ProcessPacket(const pcap_pkthdr* header, const u_char* packet);
     std::string GetProcessNameByPort(unsigned short port);
@@ -56,12 +59,14 @@ private:
     bool IsLocalAddress(const std::string& ip) const;
     bool IsPrivateNetworkAddress(const std::string& ip) const;
     PacketDirection DeterminePacketDirection(const std::string& sourceIp) const;
+    NetworkLogger logger;
 
     pcap_t* handle;
     std::string currentAdapter;
     bool isCapturing;
     std::atomic<bool> isRunning;
     SOCKET rawSocket;
+    std::string GetCurrentTimestamp() const;
     std::thread captureThread;
     std::unordered_map<std::string, std::string> connections;
     std::unordered_map<unsigned short, std::string> knownServices;

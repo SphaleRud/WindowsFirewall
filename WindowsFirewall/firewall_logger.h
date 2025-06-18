@@ -24,7 +24,8 @@ enum class FirewallEventType {
     FILTER_CHANGED,   
     PACKETS_CLEARED, 
     PACKETS_SAVED,
-    SERVICE_EVENT
+    SERVICE_EVENT,
+    PACKETS_LOADED
 };  
 
 // Структура события
@@ -299,6 +300,7 @@ private:
         case FirewallEventType::PACKETS_CLEARED: return "PACKETS_CLEARED";
         case FirewallEventType::PACKETS_SAVED: return "PACKETS_SAVED";
         case FirewallEventType::SERVICE_EVENT: return "SERVICE_EVENT";
+        case FirewallEventType::PACKETS_LOADED: return "PACKETS_LOADED";
         default: return "UNKNOWN";
         }
     }

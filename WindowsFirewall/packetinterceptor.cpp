@@ -415,7 +415,7 @@ bool PacketInterceptor::StartCapture(const std::string& adapterIp) {
         device->name,
         65536,          // snaplen
         1,              // promiscuous mode
-        50,             // read timeout - уменьшаем до 50мс
+        50,             // read timeout - уменьшен до 50мс
         errbuf
     );
 
@@ -431,8 +431,8 @@ bool PacketInterceptor::StartCapture(const std::string& adapterIp) {
     int linkType = pcap_datalink(handle);
     OutputDebugStringA(("Link type: " + std::to_string(linkType) + "\n").c_str());
 
-    // Устанавливаем буфер большего размера
-    if (pcap_setbuff(handle, 512000) != 0) {
+    // Уменьшаем размер буфера
+    if (pcap_setbuff(handle, 65536) != 0) {
         OutputDebugStringA("Warning: Failed to set buffer size\n");
     }
 
@@ -491,11 +491,34 @@ bool PacketInterceptor::StopCapture() {
     // Прерываем pcap_loop если он используется
     if (handle) {
         pcap_breakloop(handle);
+
+        // Очищаем все оставшиеся пакеты в буфере
+        struct pcap_pkthdr* header;
+        const u_char* packet;
+        while (pcap_next_ex(handle, &header, &packet) == 1) {
+            // Просто читаем пакеты, но не обрабатываем их
+        }
     }
 
-    // Ждем завершения потока
+    // Ждем завершения потока с таймаутом
     if (captureThread.joinable()) {
-        captureThread.join();
+        auto start = std::chrono::steady_clock::now();
+        while (captureThread.joinable()) {
+            // Пытаемся присоединить поток
+            if (captureThread.joinable()) {
+                captureThread.join();
+                break;
+            }
+
+            // Проверяем таймаут (1 секунда)
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count() > 1000) {
+                OutputDebugStringA("Force stopping capture thread - timeout reached\n");
+                break;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
     }
 
     // Закрываем handle
@@ -512,7 +535,7 @@ void PacketInterceptor::CaptureThread(PacketInterceptor* interceptor) {
         OutputDebugStringA("Capture thread starting\n");
         struct pcap_pkthdr* header;
         const u_char* packet;
-        int timeouts = 0; // Счетчик таймаутов для отладки
+        int timeouts = 0;
 
         while (interceptor->isRunning) {
             if (!interceptor->handle) {
@@ -521,18 +544,22 @@ void PacketInterceptor::CaptureThread(PacketInterceptor* interceptor) {
             }
 
             int result = pcap_next_ex(interceptor->handle, &header, &packet);
+
+            // Проверяем флаг остановки после каждого пакета
+            if (!interceptor->isRunning) {
+                OutputDebugStringA("Capture stopped, exiting thread\n");
+                break;
+            }
+
             switch (result) {
             case 1:  // Пакет успешно захвачен
-                //OutputDebugStringA("Packet captured\n");
-                timeouts = 0; // Сбрасываем счетчик таймаутов
+                timeouts = 0;
                 interceptor->ProcessPacket(header, packet);
                 break;
 
             case 0:  // Таймаут
                 timeouts++;
-                if (timeouts % 100 == 0) { // Логируем каждый сотый таймаут
-                    OutputDebugStringA(("Timeouts: " + std::to_string(timeouts) + "\n").c_str());
-                }
+                if (!interceptor->isRunning) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
 
@@ -542,20 +569,18 @@ void PacketInterceptor::CaptureThread(PacketInterceptor* interceptor) {
                 error += pcap_geterr(interceptor->handle);
                 OutputDebugStringA((error + "\n").c_str());
                 if (!interceptor->isRunning) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
 
             case -2: // EOF или прерывание
                 OutputDebugStringA("Capture EOF or interrupted\n");
-                if (!interceptor->isRunning) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                continue;
+                return;
 
             default:
                 OutputDebugStringA(("Unknown result from pcap_next_ex: " + std::to_string(result) + "\n").c_str());
                 if (!interceptor->isRunning) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
         }
@@ -702,6 +727,7 @@ void PacketInterceptor::ProcessPacket(const pcap_pkthdr* header, const u_char* p
             PacketInfo info = {};
             info.processId = 0;
             info.processName = "Unknown";
+            info.adapterIp = currentAdapter;
 
             // Время
             SYSTEMTIME st = {};

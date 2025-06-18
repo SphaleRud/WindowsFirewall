@@ -150,6 +150,7 @@ struct PacketInfo {
     std::string time;
     std::string sourceDomain;
     std::string destDomain;
+    std::string adapterIp;
     size_t size;
     uint16_t sourcePort;
     uint32_t  processId;

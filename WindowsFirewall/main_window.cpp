@@ -498,57 +498,138 @@ void MainWindow::SaveAdapterPackets(const std::string& adapter) {
 }
 
 void MainWindow::LoadAdapterPackets(const std::string& adapter) {
+    OutputDebugStringA(("Loading packets for adapter: " + adapter + "\n").c_str());
+
     std::string filename = "packets_" + adapter + ".csv";
     std::ifstream fin(filename);
-    if (!fin) return;
+    if (!fin) {
+        OutputDebugStringA(("Failed to open file: " + filename + "\n").c_str());
+        return;
+    }
+
     std::map<std::string, GroupedPacketInfo> loaded;
     std::string line;
+    size_t lineCount = 0;
+
+    // Пропускаем заголовок если он есть
+    std::getline(fin, line);
+
     while (std::getline(fin, line)) {
-        std::stringstream ss(line);
-        GroupedPacketInfo pkt;
+        try {
+            std::stringstream ss(line);
+            GroupedPacketInfo pkt;
 
-        std::getline(ss, pkt.time, ',');
-        std::getline(ss, pkt.sourceIp, ',');
-        std::getline(ss, pkt.destIp, ',');
-        std::getline(ss, pkt.protocol, ',');
-        std::getline(ss, pkt.processName, ',');
+            std::getline(ss, pkt.time, ',');
+            std::getline(ss, pkt.sourceIp, ',');
+            std::getline(ss, pkt.destIp, ',');
+            std::getline(ss, pkt.protocol, ',');
+            std::getline(ss, pkt.processName, ',');
 
-        std::string temp;
-        std::getline(ss, temp, ','); // totalSize
-        pkt.totalSize = std::stoull(temp);
+            std::string temp;
+            std::getline(ss, temp, ','); // totalSize
+            pkt.totalSize = std::stoull(temp);
 
-        std::getline(ss, temp, ','); // packetCount
-        pkt.packetCount = std::stoul(temp);
+            std::getline(ss, temp, ','); // packetCount
+            pkt.packetCount = std::stoul(temp);
 
-        std::getline(ss, temp, ','); // processId
-        pkt.processId = static_cast<uint32_t>(std::stoul(temp));
+            std::getline(ss, temp, ','); // processId
+            pkt.processId = static_cast<uint32_t>(std::stoul(temp));
 
-        std::getline(ss, temp, ','); // sourcePort
-        pkt.sourcePort = static_cast<uint16_t>(std::stoi(temp));
+            std::getline(ss, temp, ','); // sourcePort
+            pkt.sourcePort = static_cast<uint16_t>(std::stoi(temp));
 
-        std::getline(ss, temp, ','); // destPort
-        pkt.destPort = static_cast<uint16_t>(std::stoi(temp));
+            std::getline(ss, temp, ','); // destPort
+            pkt.destPort = static_cast<uint16_t>(std::stoi(temp));
 
-        std::getline(ss, temp, ','); // direction
-        pkt.direction = (temp == "in") ? PacketDirection::Incoming : PacketDirection::Outgoing;
+            std::getline(ss, temp, ','); // direction
+            pkt.direction = (temp == "in") ? PacketDirection::Incoming : PacketDirection::Outgoing;
 
+            std::string key = pkt.GetKey();
+            loaded[key] = pkt;
+            lineCount++;
 
-        loaded[pkt.GetKey()] = pkt;
-    }
-    fin.close();
-    adapterPackets[adapter] = loaded;
-
-    // После загрузки сбрасываем порядок
-    {
-        std::lock_guard<std::mutex> lock(groupedPacketsMutex);
-        groupedPacketView.order.clear();
-        for (const auto& pair : loaded) {
-            groupedPacketView.order.push_back(pair.first);
+            OutputDebugStringA(("Loaded packet: " + key +
+                "\nProcess: " + pkt.processName +
+                "\nProtocol: " + pkt.protocol +
+                "\nCount: " + std::to_string(pkt.packetCount) + "\n").c_str());
+        }
+        catch (const std::exception& e) {
+            OutputDebugStringA(("Error parsing line: " + line + "\nError: " + e.what() + "\n").c_str());
         }
     }
+    fin.close();
+
+    // Собираем статистику по загруженным пакетам
+    std::map<std::string, size_t> processStats;
+    std::map<std::string, size_t> protocolStats;
+    size_t totalPackets = 0;
+    for (const auto& pair : loaded) {
+        processStats[pair.second.processName] += pair.second.packetCount;
+        protocolStats[pair.second.protocol] += pair.second.packetCount;
+        totalPackets += pair.second.packetCount;
+    }
+
+    // Логируем статистику
+    std::stringstream stats;
+    stats << "Loaded packets statistics:\n"
+        << "Total groups: " << loaded.size() << "\n"
+        << "Total packets: " << totalPackets << "\n"
+        << "\nBy process:\n";
+    for (const auto& proc : processStats) {
+        stats << " - " << proc.first << ": " << proc.second << " packets\n";
+    }
+    stats << "\nBy protocol:\n";
+    for (const auto& proto : protocolStats) {
+        stats << " - " << proto.first << ": " << proto.second << " packets\n";
+    }
+    OutputDebugStringA(stats.str().c_str());
+
+    {
+        std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+        // Сохраняем в глобальный map адаптеров
+        adapterPackets[adapter] = loaded;
+
+        // Обновляем текущие пакеты
+        groupedPackets = loaded;
+
+        // Очищаем и обновляем порядок отображения
+        groupedPacketView.order.clear();
+        displayedKeys.clear();
+
+        // Создаем вектор для сортировки
+        std::vector<std::pair<std::string, std::string>> sortedKeys; // key, time
+        for (const auto& pair : loaded) {
+            sortedKeys.push_back({ pair.first, pair.second.time });
+        }
+
+        // Сортируем по времени
+        std::sort(sortedKeys.begin(), sortedKeys.end(),
+            [](const auto& a, const auto& b) {
+                return a.second < b.second;
+            });
+
+        // Обновляем порядок
+        for (const auto& pair : sortedKeys) {
+            groupedPacketView.order.push_back(pair.first);
+        }
+
+        OutputDebugStringA(("Order updated with " +
+            std::to_string(groupedPacketView.order.size()) + " items\n").c_str());
+    }
+
+    // Обновляем отображение
+    UpdateGroupedPacketsNoDuplicates();
+
+    FirewallLogger::Instance().LogServiceEvent(
+        FirewallEventType::PACKETS_LOADED,
+        stats.str()
+    );
 }
 
 void MainWindow::UpdateGroupedPacketsNoDuplicates() {
+    OutputDebugStringA("\n=== Starting UpdateGroupedPacketsNoDuplicates ===\n");
+    OutputDebugStringA(("Current adapter: " + selectedAdapterIp + "\n").c_str());
+
     // Сохраняем текущую позицию скролла
     int topIndex = ListView_GetTopIndex(connectionsListView.GetHandle());
 
@@ -556,10 +637,36 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
 
     std::deque<std::string> orderCopy;
     std::map<std::string, GroupedPacketInfo> groupsCopy;
+
     {
         std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+
+        // Убеждаемся, что у нас есть выбранный адаптер
+        if (!selectedAdapterIp.empty()) {
+            // Получаем пакеты только для текущего адаптера
+            auto adapterIt = adapterPackets.find(selectedAdapterIp);
+            if (adapterIt != adapterPackets.end()) {
+                groupsCopy = adapterIt->second;
+
+                // Обновляем текущие пакеты для выбранного адаптера
+                groupedPackets = groupsCopy;
+
+                OutputDebugStringA(("Loaded " + std::to_string(groupsCopy.size()) +
+                    " packet groups for adapter " + selectedAdapterIp + "\n").c_str());
+            }
+            else {
+                OutputDebugStringA("No packets found for current adapter\n");
+                groupsCopy.clear();
+                groupedPackets.clear();
+            }
+        }
+        else {
+            OutputDebugStringA("No adapter selected\n");
+            groupsCopy.clear();
+            groupedPackets.clear();
+        }
+
         orderCopy = groupedPacketView.order;
-        groupsCopy = groupedPackets;
     }
 
     // Проверяем только новые ключи
@@ -567,46 +674,70 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
     for (const auto& key : orderCopy) {
         if (displayedKeys.find(key) == displayedKeys.end()) {
             newKeys.insert(key);
+            OutputDebugStringA(("New key found: " + key + "\n").c_str());
         }
     }
+
     // Если есть новые ключи, обновляем весь список
     if (!newKeys.empty()) {
+        OutputDebugStringA(("Updating list view with " +
+            std::to_string(newKeys.size()) + " new packets\n").c_str());
+
         connectionsListView.Clear();
         displayedKeys.clear();
 
         size_t total = orderCopy.size();
         size_t start = (total > MAX_DISPLAYED_PACKETS) ? total - MAX_DISPLAYED_PACKETS : 0;
 
+        size_t displayed = 0;
+        size_t filtered = 0;
+
         for (size_t i = start; i < total; ++i) {
             const std::string& key = orderCopy[i];
             auto it = groupsCopy.find(key);
-            if (it == groupsCopy.end())
+            if (it == groupsCopy.end()) {
+                OutputDebugStringA(("Key not found in groups: " + key + "\n").c_str());
                 continue;
+            }
+
             const auto& packet = it->second;
 
-            OutputDebugStringA(("UpdateGroupedPacketsNoDuplicates: proto=" + packet.protocol +
-                " src=" + packet.sourceIp +
-                " dst=" + packet.destIp +
-                " sport=" + std::to_string(packet.sourcePort) +
-                " dport=" + std::to_string(packet.destPort) + "\n").c_str());
+            // Отладочная информация
+            std::stringstream debugInfo;
+            debugInfo << "Processing packet:\n"
+                << "Protocol: " << packet.protocol << "\n"
+                << "Process: " << packet.processName << "\n"
+                << "Source: " << packet.sourceIp << ":" << packet.sourcePort << "\n"
+                << "Dest: " << packet.destIp << ":" << packet.destPort << "\n"
+                << "Count: " << packet.packetCount << "\n";
+            OutputDebugStringA(debugInfo.str().c_str());
 
-            // --- ФИЛЬТРАЦИЯ ПО ПРОТОКОЛУ ---
+            // Фильтрация по протоколу
+            bool filtered_out = false;
             switch (settings.protocolFilter) {
             case ProtocolFilter::All:
-                // показываем любой пакет
                 break;
             case ProtocolFilter::TCP_UDP:
-                if (packet.protocol != "TCP" && packet.protocol != "UDP")
-                    continue;
+                if (packet.protocol != "TCP" && packet.protocol != "UDP") {
+                    filtered_out = true;
+                }
                 break;
             case ProtocolFilter::TCP:
-                if (packet.protocol != "TCP")
-                    continue;
+                if (packet.protocol != "TCP") {
+                    filtered_out = true;
+                }
                 break;
             case ProtocolFilter::UDP:
-                if (packet.protocol != "UDP")
-                    continue;
+                if (packet.protocol != "UDP") {
+                    filtered_out = true;
+                }
                 break;
+            }
+
+            if (filtered_out) {
+                filtered++;
+                OutputDebugStringA("Packet filtered out by protocol\n");
+                continue;
             }
 
             std::vector<std::wstring> items;
@@ -622,7 +753,16 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
 
             connectionsListView.AddItem(items);
             displayedKeys.insert(key);
+            displayed++;
         }
+
+        OutputDebugStringA(("Update complete:\n"
+            "Total groups: " + std::to_string(total) + "\n" +
+            "Displayed: " + std::to_string(displayed) + "\n" +
+            "Filtered: " + std::to_string(filtered) + "\n").c_str());
+    }
+    else {
+        OutputDebugStringA("No new packets to display\n");
     }
 
     connectionsListView.SetRedraw(true);
@@ -631,7 +771,10 @@ void MainWindow::UpdateGroupedPacketsNoDuplicates() {
     if (topIndex > 0) {
         ListView_EnsureVisible(connectionsListView.GetHandle(), topIndex, FALSE);
     }
+
     InvalidateRect(connectionsListView.GetHandle(), NULL, FALSE);
+
+    OutputDebugStringA("=== UpdateGroupedPacketsNoDuplicates completed ===\n\n");
 }
 
 void MainWindow::ClearSavedAdapterPackets(const std::string& adapter) {
@@ -764,20 +907,53 @@ void MainWindow::OnStartCapture() {
 
 void MainWindow::OnStopCapture() {
     if (isCapturing) {
+        // Сначала сохраняем текущие пакеты для адаптера
+        if (!selectedAdapterIp.empty()) {
+            std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+            adapterPackets[selectedAdapterIp] = groupedPackets;
+
+            std::stringstream ss;
+            ss << "Saving packets for adapter " << selectedAdapterIp << "\n"
+                << "Total groups: " << groupedPackets.size() << "\n"
+                << "Groups by process:\n";
+
+            // Подсчитываем пакеты по процессам
+            std::map<std::string, size_t> processCounts;
+            for (const auto& pair : groupedPackets) {
+                processCounts[pair.second.processName]++;
+            }
+
+            for (const auto& proc : processCounts) {
+                ss << " - " << proc.first << ": " << proc.second << " groups\n";
+            }
+
+            FirewallLogger::Instance().LogServiceEvent(
+                FirewallEventType::PACKETS_SAVED,
+                ss.str()
+            );
+        }
+
+        // Теперь останавливаем захват
         packetInterceptor.StopCapture();
         isCapturing = false;
+
         // Получаем количество пакетов из вашей структуры данных
         size_t packetCount = groupedPackets.size();
 
         FirewallLogger::Instance().LogServiceEvent(
             FirewallEventType::CAPTURE_STOPPED,
-            "Stopped packet capture on adapter: " + selectedAdapterIp +
-            "\nTotal packet groups: " + std::to_string(packetCount)
+            "Stopped packet capture on adapter: " + selectedAdapterIp
         );
+
         EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
         EnableWindow(GetDlgItem(hwnd, IDC_STOP_CAPTURE), FALSE);
         EnableWindow(GetDlgItem(hwnd, IDC_ADAPTER_COMBO), TRUE);
+
         AddSystemMessage(L"Capture stopped");
+
+        // НЕ очищаем группы пакетов здесь
+        // Обновляем отображение с текущими данными
+        UpdateGroupedPacketsNoDuplicates();
     }
 }
 
@@ -1399,8 +1575,8 @@ void MainWindow::ShowPacketProperties(int itemIndex) {
 }
 
 void MainWindow::OnAdapterSelected() {
-    if (!selectedAdapterIp.empty()) {
-        adapterPackets[selectedAdapterIp] = groupedPackets;
+    if (selectedAdapterIp.empty()) {
+        return;
     }
 
     HWND comboBox = GetDlgItem(hwnd, IDC_ADAPTER_COMBO);
@@ -1409,42 +1585,32 @@ void MainWindow::OnAdapterSelected() {
     if (selectedIndex != CB_ERR) {
         auto adapters = packetInterceptor.GetAdapters();
         if (selectedIndex < static_cast<int>(adapters.size())) {
-            // Получаем информацию о предыдущем и новом адаптере
             std::string previousAdapter = selectedAdapterIp;
             selectedAdapterIp = adapters[selectedIndex].address;
-            UpdateAdapterInfo();
+
             // Логируем смену адаптера
             std::stringstream details;
             details << "Network adapter changed\n"
                 << "Previous: " << (previousAdapter.empty() ? "none" : previousAdapter) << "\n"
-                << "New: " << selectedAdapterIp << "\n"
-                << "Adapter name: " << adapters[selectedIndex].name << "\n"
-                << "Adapter description: " << adapters[selectedIndex].description;
+                << "New: " << selectedAdapterIp;
 
             FirewallLogger::Instance().LogServiceEvent(
                 FirewallEventType::ADAPTER_CHANGED,
                 details.str()
             );
-            // Всегда пробуем загрузить список с диска для выбранного адаптера
-            LoadAdapterPackets(selectedAdapterIp);
 
-            if (adapterPackets.count(selectedAdapterIp) && !adapterPackets[selectedAdapterIp].empty()) {
-                groupedPackets = adapterPackets[selectedAdapterIp];
-            }
-            else {
-                groupedPackets.clear();
-            }
-            // Сбросить порядок после смены адаптера!
-            // После загрузки адаптера:
+            // Очищаем текущие пакеты перед загрузкой новых
             {
                 std::lock_guard<std::mutex> lock(groupedPacketsMutex);
+                groupedPackets.clear();
                 groupedPacketView.order.clear();
-                displayedKeys.clear(); // Очищаем отслеживание
-                for (const auto& pair : groupedPackets) {
-                    groupedPacketView.order.push_back(pair.first);
-                }
+                displayedKeys.clear();
             }
-            UpdateGroupedPacketsNoDuplicates();
+
+            // Загружаем пакеты только для выбранного адаптера
+            LoadAdapterPackets(selectedAdapterIp);
+
+            UpdateAdapterInfo();
             EnableWindow(GetDlgItem(hwnd, IDC_START_CAPTURE), TRUE);
         }
     }

@@ -1,5 +1,5 @@
 ﻿  firewall_logger.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'firewall_logger.cpp')
   
   main_window.cpp
@@ -18,19 +18,19 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(131,9): warning C4005: 'ID
       D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(127,9):
       see previous definition of 'IDC_RADIO_ALL'
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'main_window.cpp')
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(937,19): warning C4312: 'type cast': conversion from 'int' to 'HMENU' of greater size
-D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1001,73): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1407,23): warning C4244: 'initializing': conversion from 'LRESULT' to 'int', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1113,19): warning C4312: 'type cast': conversion from 'int' to 'HMENU' of greater size
+D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1177,73): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\main_window.cpp(1583,23): warning C4244: 'initializing': conversion from 'LRESULT' to 'int', possible loss of data
   packetinterceptor.cpp
 D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(101,42): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
 D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(115,42): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(617,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
-D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(639,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(642,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
+D:\Desktop\WindowsFirewall\WindowsFirewall\packetinterceptor.cpp(664,41): warning C4244: 'argument': conversion from 'DWORD' to 'u_short', possible loss of data
   rule_manager.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'rule_manager.cpp')
   
 D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
@@ -82,7 +82,7 @@ E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xutility(4
           ]
   
   rule_wizard.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'rule_wizard.cpp')
   
 D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
@@ -132,7 +132,7 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(131,9): warning C4005: 'ID
       D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(127,9):
       see previous definition of 'IDC_RADIO_ALL'
   
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'WindowsFirewall.cpp')
   
   Generating Code...

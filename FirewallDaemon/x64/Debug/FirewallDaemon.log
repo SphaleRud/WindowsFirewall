@@ -1,5 +1,5 @@
 ﻿  rule_manager.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
   (compiling source file '../WindowsFirewall/rule_manager.cpp')
   
 D:\Desktop\WindowsFirewall\WindowsFirewall\Resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
@@ -51,7 +51,7 @@ E:\Programs\Microsoft Visual Studio\VC\Tools\MSVC\14.44.35207\include\xutility(4
           ]
   
   rule_wizard.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
   (compiling source file '../WindowsFirewall/rule_wizard.cpp')
   
 D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(42,9): warning C4005: 'IDD_PACKET_PROPERTIES': macro redefinition
@@ -70,11 +70,11 @@ D:\Desktop\WindowsFirewall\WindowsFirewall\resource.h(131,9): warning C4005: 'ID
       see previous definition of 'IDC_RADIO_ALL'
   
   FirewallDaemon.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'FirewallDaemon.cpp')
   
   wfp_manager.cpp
-D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(80,61): warning C4101: 'e': unreferenced local variable
+D:\Desktop\WindowsFirewall\WindowsFirewall\firewall_logger.h(81,61): warning C4101: 'e': unreferenced local variable
   (compiling source file 'wfp_manager.cpp')
   
   Generating Code...
